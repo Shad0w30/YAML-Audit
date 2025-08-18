@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Advanced Kubernetes Security Scanner</title>
+    <title>Security Scanner</title>
     <script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -37,10 +37,18 @@
         .summary-item { text-align: center; padding: 10px; }
         .summary-count { font-size: 24px; font-weight: bold; }
         .summary-label { font-size: 14px; }
+        pre { 
+            background-color: #f5f5f5;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+        }
+        .snippet-row td { padding: 0; }
+        .snippet-row pre { margin: 0; border: none; border-radius: 0; }
     </style>
 </head>
 <body>
-    <h1>Advanced Kubernetes Security Scanner</h1>
+    <h1>Security Scanner</h1>
     
     <div class="tab">
         <button class="tablinks active" onclick="openTab(event, 'inputTab')">Input</button>
@@ -57,6 +65,7 @@
                 <option value="yaml">YAML</option>
                 <option value="json">JSON</option>
             </select>
+            <button onclick="loadSample()">Load Sample</button>
         </div>
     </div>
     
@@ -74,43 +83,26 @@
     </div>
 
     <script>
+        // Global variables
         const CIS_MAP = {
-            // Container Security
             privileged: { id: 'CIS 5.2.1', title: 'Privileged Container' },
             allowPrivilegeEscalation: { id: 'CIS 5.2.6', title: 'Allow Privilege Escalation' },
             runAsRoot: { id: 'CIS 5.2.5', title: 'Run as Root User' },
             readOnlyRootFS: { id: 'CIS 5.2.7', title: 'Read-only Root Filesystem' },
             capabilities: { id: 'CIS 5.2.8/5.2.9', title: 'Dangerous Capabilities' },
-            seLinuxOptions: { id: 'CIS 5.2.10', title: 'SELinux Context Options' },
-            procMount: { id: 'CIS 5.2.11', title: '/proc Mount Type' },
-            
-            // Resource Management
             resourceLimits: { id: 'CIS 5.1.1', title: 'Resource Limits' },
             resourceLimitsCPU: { id: 'CIS 5.1.2', title: 'CPU Limits' },
             resourceLimitsMemory: { id: 'CIS 5.1.3', title: 'Memory Limits' },
-            
-            // Image Management
             imageLatestTag: { id: 'CIS 5.4.1', title: 'Latest Image Tag' },
-            imageDigest: { id: 'CIS 5.4.2', title: 'Image Digest' },
-            
-            // Pod Security
             hostNamespace: { id: 'CIS 5.2.2/5.2.3/5.2.4', title: 'Host Namespace Sharing' },
             defaultServiceAccount: { id: 'CIS 5.1.5', title: 'Default Service Account' },
             hostPathVolume: { id: 'CIS 5.3.6', title: 'HostPath Volume' },
             missingProbes: { id: 'CIS 5.7.4', title: 'Missing Health Probes' },
-            
-            // Network Security
             networkPolicy: { id: 'CIS 6.3.1', title: 'Network Policy' },
-            hostPort: { id: 'CIS 5.3.5', title: 'Host Port Usage' },
-            
-            // Secrets Management
             secretsEnv: { id: 'CIS 5.5.1', title: 'Secrets in Environment Variables' },
             secretsVolume: { id: 'CIS 5.5.2', title: 'Secrets Mounted as Volumes' },
-            
-            // General Security
             appArmor: { id: 'CIS 5.2.12', title: 'AppArmor Profile' },
-            seccomp: { id: 'CIS 5.2.13', title: 'Seccomp Profile' },
-            podSecurityPolicy: { id: 'CIS 5.2.14', title: 'Pod Security Policy' }
+            seccomp: { id: 'CIS 5.2.13', title: 'Seccomp Profile' }
         };
 
         const SECRET_PATTERNS = [
@@ -119,18 +111,13 @@
             { regex: /-----BEGIN (RSA|EC|DSA|PGP) PRIVATE KEY-----/, desc: 'Private Key' },
             { regex: /-----BEGIN CERTIFICATE-----/, desc: 'Certificate' },
             { regex: /eyJhbGciOiJ[^\s"]*/, desc: 'JWT Token' },
-            { regex: /(?:http|https):\/\/[^\s]+/, desc: 'URL with potential credentials' },
-            { regex: /(?:password|passwd|pwd|secret|token|key|credential)[^a-zA-Z0-9][^'"\n]*[=:][^'"\n]*/, desc: 'Potential credential' },
-            { regex: /(?:api[_-]?key|access[_-]?token|secret[_-]?key)/i, desc: 'API key reference' },
-            { regex: /(?:github|gitlab|bitbucket)[^a-zA-Z0-9].*(?:token|key|password)/i, desc: 'Git credential' },
-            { regex: /(?:database|db)[^a-zA-Z0-9].*(?:password|pwd|user|url)/i, desc: 'Database credential' }
+            { regex: /(?:password|passwd|pwd|secret|token|key|credential)[^a-zA-Z0-9][^'"\n]*[=:][^'"\n]*/, desc: 'Potential credential' }
         ];
 
         const DANGEROUS_CAPABILITIES = [
             'ALL', 'NET_ADMIN', 'NET_RAW', 'SYS_ADMIN', 'SYS_MODULE', 
             'SYS_PTRACE', 'SYS_RAWIO', 'SYS_CHROOT', 'DAC_OVERRIDE',
-            'FOWNER', 'SETUID', 'SETGID', 'KILL', 'MKNOD', 'AUDIT_CONTROL',
-            'MAC_ADMIN', 'MAC_OVERRIDE'
+            'FOWNER', 'SETUID', 'SETGID', 'KILL', 'MKNOD'
         ];
 
         let findings = [];
@@ -138,6 +125,7 @@
         let originalConfig = '';
         let configLines = [];
 
+        // Tab management
         function openTab(evt, tabName) {
             const tabcontent = document.getElementsByClassName("tabcontent");
             for (let i = 0; i < tabcontent.length; i++) {
@@ -153,8 +141,62 @@
             evt.currentTarget.className += " active";
         }
 
+        // Load sample configuration
+        function loadSample() {
+            const sampleYaml = `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-deployment
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:latest
+        securityContext:
+          privileged: true
+          allowPrivilegeEscalation: true
+          runAsUser: 0
+        ports:
+        - containerPort: 80
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+        env:
+        - name: SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: my-secret
+              key: secret-key
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: my-secret
+type: Opaque
+data:
+  secret-key: dGhpcy1pcy1hLXNlY3JldC1rZXkK
+`;
+            document.getElementById('configInput').value = sampleYaml;
+            document.getElementById('inputType').value = 'yaml';
+        }
+
+        // Main scanning function
         function scanConfig() {
             const configContent = document.getElementById('configInput').value;
+            if (!configContent.trim()) {
+                alert("Please enter some YAML or JSON content to scan");
+                return;
+            }
+            
             originalConfig = configContent;
             configLines = configContent.split('\n');
             const inputType = document.getElementById('inputType').value;
@@ -177,7 +219,6 @@
             docs.forEach((doc, docIndex) => {
                 if (!doc || typeof doc !== 'object') return;
 
-                // Check for common Kubernetes resource types
                 if (doc.kind) {
                     switch(doc.kind.toLowerCase()) {
                         case 'pod':
@@ -213,60 +254,44 @@
                         case 'serviceaccount':
                             checkServiceAccountSecurity(doc);
                             break;
-                        case 'podsecuritypolicy':
-                            checkPodSecurityPolicy(doc);
-                            break;
                         default:
                             checkGenericResourceSecurity(doc);
                     }
                 } else {
-                    // Generic security checks for non-Kubernetes YAML/JSON
                     checkGenericYamlSecurity(doc);
                 }
 
-                // Always scan for secrets
                 scanSecrets(doc);
             });
 
             renderResults();
             renderAutoFixes();
+            openTab(null, 'resultsTab');
         }
 
+        // Security check functions
         function checkPodSecurity(pod) {
             const spec = pod.spec || {};
-            
-            // Check security contexts
             checkPodSecurityContext(spec.securityContext, pod);
             
-            // Check containers
             if (spec.containers) {
                 spec.containers.forEach(container => {
                     checkContainerSecurity(container, pod);
                 });
             }
             
-            // Check init containers
             if (spec.initContainers) {
                 spec.initContainers.forEach(container => {
                     checkContainerSecurity(container, pod);
                 });
             }
             
-            // Check volumes
             if (spec.volumes) {
                 checkVolumes(spec.volumes, pod);
             }
             
-            // Check host namespaces
             checkHostNamespaces(spec, pod);
-            
-            // Check service account
             checkServiceAccount(spec, pod);
-            
-            // Check affinity/anti-affinity
-            if (spec.affinity) {
-                checkAffinity(spec.affinity, pod);
-            }
         }
 
         function checkWorkloadSecurity(workload) {
@@ -278,25 +303,12 @@
                     spec: template.spec 
                 });
             }
-            
-            // Workload-specific checks
-            if (workload.kind.toLowerCase() === 'cronjob') {
-                const jobTemplate = workload.spec?.jobTemplate;
-                if (jobTemplate && jobTemplate.spec?.template?.spec) {
-                    checkPodSecurity({ 
-                        kind: 'Pod', 
-                        metadata: jobTemplate.spec.template.metadata, 
-                        spec: jobTemplate.spec.template.spec 
-                    });
-                }
-            }
         }
 
         function checkContainerSecurity(container, parentResource) {
             const ctx = container.securityContext || {};
             const lineInfo = findLineInfo(container, 'name', container.name);
             
-            // Privileged container
             if (ctx.privileged) {
                 addFinding({
                     id: CIS_MAP.privileged.id,
@@ -311,7 +323,6 @@
                     remediation: 'Set securityContext.privileged to false'
                 });
                 
-                // Add auto-fix
                 addAutoFix(parentResource, {
                     path: `/spec/template/spec/containers/[name=${container.name}]/securityContext/privileged`,
                     value: false,
@@ -319,7 +330,6 @@
                 });
             }
             
-            // Allow privilege escalation
             if (ctx.allowPrivilegeEscalation !== false) {
                 addFinding({
                     id: CIS_MAP.allowPrivilegeEscalation.id,
@@ -341,7 +351,6 @@
                 });
             }
             
-            // Run as root
             if (ctx.runAsUser === 0 || ctx.runAsUser === '0') {
                 addFinding({
                     id: CIS_MAP.runAsRoot.id,
@@ -363,7 +372,6 @@
                 });
             }
             
-            // Read-only root filesystem
             if (ctx.readOnlyRootFilesystem !== true) {
                 addFinding({
                     id: CIS_MAP.readOnlyRootFS.id,
@@ -385,7 +393,6 @@
                 });
             }
             
-            // Dangerous capabilities
             if (ctx.capabilities && ctx.capabilities.add) {
                 const dangerousCaps = ctx.capabilities.add.filter(cap => 
                     DANGEROUS_CAPABILITIES.includes(cap.toUpperCase())
@@ -415,34 +422,6 @@
                 }
             }
             
-            // Missing capabilities.drop
-            if (!ctx.capabilities || !ctx.capabilities.drop || !ctx.capabilities.drop.includes('ALL')) {
-                addFinding({
-                    id: CIS_MAP.capabilities.id,
-                    title: CIS_MAP.capabilities.title,
-                    message: `Container '${container.name}' does not drop all capabilities by default`,
-                    severity: 'Medium',
-                    resource: parentResource.metadata?.name || 'Unknown',
-                    kind: parentResource.kind || 'Unknown',
-                    line: lineInfo.line,
-                    column: lineInfo.column,
-                    snippet: lineInfo.snippet,
-                    remediation: 'Add ALL to securityContext.capabilities.drop'
-                });
-                
-                const newDrop = ctx.capabilities?.drop || [];
-                if (!newDrop.includes('ALL')) {
-                    newDrop.push('ALL');
-                }
-                
-                addAutoFix(parentResource, {
-                    path: `/spec/template/spec/containers/[name=${container.name}]/securityContext/capabilities/drop`,
-                    value: newDrop,
-                    op: 'replace'
-                });
-            }
-            
-            // Resource limits
             if (!container.resources || !container.resources.limits) {
                 addFinding({
                     id: CIS_MAP.resourceLimits.id,
@@ -462,134 +441,38 @@
                     value: { cpu: '500m', memory: '512Mi' },
                     op: 'add'
                 });
-            } else {
-                if (!container.resources.limits.cpu) {
-                    addFinding({
-                        id: CIS_MAP.resourceLimitsCPU.id,
-                        title: CIS_MAP.resourceLimitsCPU.title,
-                        message: `Container '${container.name}' has no CPU limit defined`,
-                        severity: 'Medium',
-                        resource: parentResource.metadata?.name || 'Unknown',
-                        kind: parentResource.kind || 'Unknown',
-                        line: lineInfo.line,
-                        column: lineInfo.column,
-                        snippet: lineInfo.snippet,
-                        remediation: 'Define CPU limit for the container'
-                    });
-                    
-                    addAutoFix(parentResource, {
-                        path: `/spec/template/spec/containers/[name=${container.name}]/resources/limits/cpu`,
-                        value: '500m',
-                        op: 'add'
-                    });
-                }
-                
-                if (!container.resources.limits.memory) {
-                    addFinding({
-                        id: CIS_MAP.resourceLimitsMemory.id,
-                        title: CIS_MAP.resourceLimitsMemory.title,
-                        message: `Container '${container.name}' has no memory limit defined`,
-                        severity: 'Medium',
-                        resource: parentResource.metadata?.name || 'Unknown',
-                        kind: parentResource.kind || 'Unknown',
-                        line: lineInfo.line,
-                        column: lineInfo.column,
-                        snippet: lineInfo.snippet,
-                        remediation: 'Define memory limit for the container'
-                    });
-                    
-                    addAutoFix(parentResource, {
-                        path: `/spec/template/spec/containers/[name=${container.name}]/resources/limits/memory`,
-                        value: '512Mi',
-                        op: 'add'
-                    });
-                }
             }
             
-            // Health probes
-            if (!container.livenessProbe) {
+            if (!container.livenessProbe || !container.readinessProbe) {
                 addFinding({
                     id: CIS_MAP.missingProbes.id,
                     title: CIS_MAP.missingProbes.title,
-                    message: `Container '${container.name}' has no liveness probe defined`,
+                    message: `Container '${container.name}' missing liveness/readiness probes`,
                     severity: 'Medium',
                     resource: parentResource.metadata?.name || 'Unknown',
                     kind: parentResource.kind || 'Unknown',
                     line: lineInfo.line,
                     column: lineInfo.column,
                     snippet: lineInfo.snippet,
-                    remediation: 'Define a liveness probe for the container'
-                });
-                
-                addAutoFix(parentResource, {
-                    path: `/spec/template/spec/containers/[name=${container.name}]/livenessProbe`,
-                    value: {
-                        httpGet: { path: '/healthz', port: 8080 },
-                        initialDelaySeconds: 15,
-                        periodSeconds: 10
-                    },
-                    op: 'add'
+                    remediation: 'Define health probes for the container'
                 });
             }
             
-            if (!container.readinessProbe) {
-                addFinding({
-                    id: CIS_MAP.missingProbes.id,
-                    title: CIS_MAP.missingProbes.title,
-                    message: `Container '${container.name}' has no readiness probe defined`,
-                    severity: 'Medium',
-                    resource: parentResource.metadata?.name || 'Unknown',
-                    kind: parentResource.kind || 'Unknown',
-                    line: lineInfo.line,
-                    column: lineInfo.column,
-                    snippet: lineInfo.snippet,
-                    remediation: 'Define a readiness probe for the container'
-                });
-                
-                addAutoFix(parentResource, {
-                    path: `/spec/template/spec/containers/[name=${container.name}]/readinessProbe`,
-                    value: {
-                        httpGet: { path: '/ready', port: 8080 },
-                        initialDelaySeconds: 5,
-                        periodSeconds: 5
-                    },
-                    op: 'add'
-                });
-            }
-            
-            // Image tag
-            if (container.image && (container.image.endsWith(':latest') || !container.image.includes(':')) {
+            if (container.image && (container.image.endsWith(':latest') || !container.image.includes(':'))) {
                 addFinding({
                     id: CIS_MAP.imageLatestTag.id,
                     title: CIS_MAP.imageLatestTag.title,
-                    message: `Container '${container.name}' is using the 'latest' tag or no tag`,
+                    message: `Container '${container.name}' uses the 'latest' tag or no tag`,
                     severity: 'Medium',
                     resource: parentResource.metadata?.name || 'Unknown',
                     kind: parentResource.kind || 'Unknown',
                     line: lineInfo.line,
                     column: lineInfo.column,
                     snippet: lineInfo.snippet,
-                    remediation: 'Use a specific immutable image tag or digest'
+                    remediation: 'Use a specific immutable image tag'
                 });
             }
             
-            // Image digest
-            if (container.image && !container.image.includes('@sha256:')) {
-                addFinding({
-                    id: CIS_MAP.imageDigest.id,
-                    title: CIS_MAP.imageDigest.title,
-                    message: `Container '${container.name}' is not using an image digest`,
-                    severity: 'Low',
-                    resource: parentResource.metadata?.name || 'Unknown',
-                    kind: parentResource.kind || 'Unknown',
-                    line: lineInfo.line,
-                    column: lineInfo.column,
-                    snippet: lineInfo.snippet,
-                    remediation: 'Use an image with digest (e.g., image@sha256:abc123...)'
-                });
-            }
-            
-            // Volume mounts
             if (container.volumeMounts) {
                 container.volumeMounts.forEach(mount => {
                     const vol = parentResource.spec?.volumes?.find(v => v.name === mount.name);
@@ -604,42 +487,26 @@
                             line: lineInfo.line,
                             column: lineInfo.column,
                             snippet: lineInfo.snippet,
-                            remediation: 'Avoid using hostPath volumes or restrict them to specific paths'
-                        });
-                    }
-                    
-                    if (mount.mountPath === '/var/run/secrets/kubernetes.io/serviceaccount') {
-                        addFinding({
-                            id: CIS_MAP.defaultServiceAccount.id,
-                            title: CIS_MAP.defaultServiceAccount.title,
-                            message: `Container '${container.name}' mounts the default service account token`,
-                            severity: 'Medium',
-                            resource: parentResource.metadata?.name || 'Unknown',
-                            kind: parentResource.kind || 'Unknown',
-                            line: lineInfo.line,
-                            column: lineInfo.column,
-                            snippet: lineInfo.snippet,
-                            remediation: 'Set automountServiceAccountToken to false or use a dedicated service account'
+                            remediation: 'Avoid using hostPath volumes'
                         });
                     }
                 });
             }
             
-            // Environment variables with secrets
             if (container.env) {
                 container.env.forEach(envVar => {
                     if (envVar.valueFrom?.secretKeyRef) {
                         addFinding({
                             id: CIS_MAP.secretsEnv.id,
                             title: CIS_MAP.secretsEnv.title,
-                            message: `Container '${container.name}' uses secret '${envVar.valueFrom.secretKeyRef.name}' in environment variable '${envVar.name}'`,
+                            message: `Container '${container.name}' uses secret in environment variable '${envVar.name}'`,
                             severity: 'Medium',
                             resource: parentResource.metadata?.name || 'Unknown',
                             kind: parentResource.kind || 'Unknown',
                             line: lineInfo.line,
                             column: lineInfo.column,
                             snippet: lineInfo.snippet,
-                            remediation: 'Consider using projected volumes with secret files instead of environment variables'
+                            remediation: 'Consider using secret volumes instead'
                         });
                     }
                 });
@@ -651,7 +518,6 @@
             
             const lineInfo = findLineInfo(pod.spec, 'securityContext');
             
-            // Run as non-root
             if (ctx.runAsNonRoot !== true) {
                 addFinding({
                     id: CIS_MAP.runAsRoot.id,
@@ -665,15 +531,8 @@
                     snippet: lineInfo.snippet,
                     remediation: 'Set securityContext.runAsNonRoot to true'
                 });
-                
-                addAutoFix(pod, {
-                    path: '/spec/securityContext/runAsNonRoot',
-                    value: true,
-                    op: 'add'
-                });
             }
             
-            // Seccomp profile
             if (!ctx.seccompProfile || ctx.seccompProfile.type !== 'RuntimeDefault') {
                 addFinding({
                     id: CIS_MAP.seccomp.id,
@@ -687,35 +546,12 @@
                     snippet: lineInfo.snippet,
                     remediation: 'Set securityContext.seccompProfile.type to RuntimeDefault'
                 });
-                
-                addAutoFix(pod, {
-                    path: '/spec/securityContext/seccompProfile',
-                    value: { type: 'RuntimeDefault' },
-                    op: 'add'
-                });
-            }
-            
-            // AppArmor profile
-            if (!ctx.appArmorProfile) {
-                addFinding({
-                    id: CIS_MAP.appArmor.id,
-                    title: CIS_MAP.appArmor.title,
-                    message: 'Pod does not specify an AppArmor profile',
-                    severity: 'Low',
-                    resource: pod.metadata?.name || 'Unknown',
-                    kind: pod.kind || 'Unknown',
-                    line: lineInfo.line,
-                    column: lineInfo.column,
-                    snippet: lineInfo.snippet,
-                    remediation: 'Consider using AppArmor to restrict container capabilities'
-                });
             }
         }
 
         function checkHostNamespaces(spec, pod) {
             const lineInfo = findLineInfo(spec, 'hostNetwork');
             
-            // Host network
             if (spec.hostNetwork) {
                 addFinding({
                     id: CIS_MAP.hostNamespace.id,
@@ -729,15 +565,8 @@
                     snippet: lineInfo.snippet,
                     remediation: 'Set hostNetwork to false'
                 });
-                
-                addAutoFix(pod, {
-                    path: '/spec/hostNetwork',
-                    value: false,
-                    op: 'replace'
-                });
             }
             
-            // Host PID
             if (spec.hostPID) {
                 addFinding({
                     id: CIS_MAP.hostNamespace.id,
@@ -751,15 +580,8 @@
                     snippet: lineInfo.snippet,
                     remediation: 'Set hostPID to false'
                 });
-                
-                addAutoFix(pod, {
-                    path: '/spec/hostPID',
-                    value: false,
-                    op: 'replace'
-                });
             }
             
-            // Host IPC
             if (spec.hostIPC) {
                 addFinding({
                     id: CIS_MAP.hostNamespace.id,
@@ -773,19 +595,12 @@
                     snippet: lineInfo.snippet,
                     remediation: 'Set hostIPC to false'
                 });
-                
-                addAutoFix(pod, {
-                    path: '/spec/hostIPC',
-                    value: false,
-                    op: 'replace'
-                });
             }
         }
 
         function checkServiceAccount(spec, pod) {
             const lineInfo = findLineInfo(spec, 'serviceAccountName');
             
-            // Default service account
             if (spec.serviceAccountName === 'default' || !spec.serviceAccountName) {
                 addFinding({
                     id: CIS_MAP.defaultServiceAccount.id,
@@ -797,11 +612,10 @@
                     line: lineInfo.line,
                     column: lineInfo.column,
                     snippet: lineInfo.snippet,
-                    remediation: 'Create a dedicated service account for the pod'
+                    remediation: 'Create a dedicated service account'
                 });
             }
             
-            // Automount service account token
             if (spec.automountServiceAccountToken !== false) {
                 addFinding({
                     id: CIS_MAP.defaultServiceAccount.id,
@@ -813,13 +627,7 @@
                     line: lineInfo.line,
                     column: lineInfo.column,
                     snippet: lineInfo.snippet,
-                    remediation: 'Set automountServiceAccountToken to false if not needed'
-                });
-                
-                addAutoFix(pod, {
-                    path: '/spec/automountServiceAccountToken',
-                    value: false,
-                    op: 'replace'
+                    remediation: 'Set automountServiceAccountToken to false'
                 });
             }
         }
@@ -828,23 +636,21 @@
             volumes.forEach(vol => {
                 const lineInfo = findLineInfo(vol, 'name', vol.name);
                 
-                // HostPath volumes
                 if (vol.hostPath) {
                     addFinding({
                         id: CIS_MAP.hostPathVolume.id,
                         title: CIS_MAP.hostPathVolume.title,
-                        message: `Pod uses hostPath volume '${vol.name}' mounted at '${vol.hostPath.path}'`,
+                        message: `Pod uses hostPath volume '${vol.name}'`,
                         severity: 'High',
                         resource: pod.metadata?.name || 'Unknown',
                         kind: pod.kind || 'Unknown',
                         line: lineInfo.line,
                         column: lineInfo.column,
                         snippet: lineInfo.snippet,
-                        remediation: 'Avoid using hostPath volumes or restrict them to specific paths'
+                        remediation: 'Avoid using hostPath volumes'
                     });
                 }
                 
-                // Secret volumes
                 if (vol.secret) {
                     addFinding({
                         id: CIS_MAP.secretsVolume.id,
@@ -856,7 +662,7 @@
                         line: lineInfo.line,
                         column: lineInfo.column,
                         snippet: lineInfo.snippet,
-                        remediation: 'Ensure secret volumes have appropriate file permissions'
+                        remediation: 'Ensure secret volumes have appropriate permissions'
                     });
                 }
             });
@@ -865,7 +671,6 @@
         function checkNetworkPolicy(policy) {
             const lineInfo = findLineInfo(policy, 'kind', 'NetworkPolicy');
             
-            // Missing ingress rules
             if (!policy.spec.ingress) {
                 addFinding({
                     id: CIS_MAP.networkPolicy.id,
@@ -877,11 +682,10 @@
                     line: lineInfo.line,
                     column: lineInfo.column,
                     snippet: lineInfo.snippet,
-                    remediation: 'Define specific ingress rules to restrict incoming traffic'
+                    remediation: 'Define specific ingress rules'
                 });
             }
             
-            // Missing egress rules
             if (!policy.spec.egress) {
                 addFinding({
                     id: CIS_MAP.networkPolicy.id,
@@ -893,40 +697,7 @@
                     line: lineInfo.line,
                     column: lineInfo.column,
                     snippet: lineInfo.snippet,
-                    remediation: 'Define specific egress rules to restrict outgoing traffic'
-                });
-            }
-            
-            // Allow-all policies
-            if (policy.spec.ingress && policy.spec.ingress.length === 1 && 
-                (!policy.spec.ingress[0].from || policy.spec.ingress[0].from.length === 0)) {
-                addFinding({
-                    id: CIS_MAP.networkPolicy.id,
-                    title: CIS_MAP.networkPolicy.title,
-                    message: 'NetworkPolicy allows all ingress traffic',
-                    severity: 'High',
-                    resource: policy.metadata?.name || 'Unknown',
-                    kind: policy.kind || 'Unknown',
-                    line: lineInfo.line,
-                    column: lineInfo.column,
-                    snippet: lineInfo.snippet,
-                    remediation: 'Restrict ingress traffic to specific sources'
-                });
-            }
-            
-            if (policy.spec.egress && policy.spec.egress.length === 1 && 
-                (!policy.spec.egress[0].to || policy.spec.egress[0].to.length === 0)) {
-                addFinding({
-                    id: CIS_MAP.networkPolicy.id,
-                    title: CIS_MAP.networkPolicy.title,
-                    message: 'NetworkPolicy allows all egress traffic',
-                    severity: 'Medium',
-                    resource: policy.metadata?.name || 'Unknown',
-                    kind: policy.kind || 'Unknown',
-                    line: lineInfo.line,
-                    column: lineInfo.column,
-                    snippet: lineInfo.snippet,
-                    remediation: 'Restrict egress traffic to specific destinations'
+                    remediation: 'Define specific egress rules'
                 });
             }
         }
@@ -942,14 +713,14 @@
                         addFinding({
                             id: 'Secret-Detection',
                             title: 'Secret Detection',
-                            message: `${p.desc}: ${match.substring(0, 20)}... (truncated)`,
+                            message: `${p.desc}: ${match.substring(0, 20)}...`,
                             severity: 'Critical',
                             resource: doc.metadata?.name || 'Unknown',
                             kind: doc.kind || 'Unknown',
                             line: lineInfo.line,
                             column: lineInfo.column,
                             snippet: lineInfo.snippet,
-                            remediation: 'Remove sensitive information from configuration and use Kubernetes Secrets'
+                            remediation: 'Remove sensitive information from configuration'
                         });
                     });
                 }
@@ -959,7 +730,6 @@
         function checkServiceSecurity(svc) {
             const lineInfo = findLineInfo(svc, 'kind', 'Service');
             
-            // External IPs
             if (svc.spec.externalIPs && svc.spec.externalIPs.length > 0) {
                 addFinding({
                     id: 'Service-ExternalIPs',
@@ -971,23 +741,7 @@
                     line: lineInfo.line,
                     column: lineInfo.column,
                     snippet: lineInfo.snippet,
-                    remediation: 'Avoid using externalIPs unless absolutely necessary'
-                });
-            }
-            
-            // LoadBalancer with external traffic
-            if (svc.spec.type === 'LoadBalancer' && svc.spec.externalTrafficPolicy !== 'Local') {
-                addFinding({
-                    id: 'Service-LoadBalancer',
-                    title: 'LoadBalancer Service',
-                    message: 'LoadBalancer service does not preserve client IPs (externalTrafficPolicy should be Local)',
-                    severity: 'Medium',
-                    resource: svc.metadata?.name || 'Unknown',
-                    kind: svc.kind || 'Unknown',
-                    line: lineInfo.line,
-                    column: lineInfo.column,
-                    snippet: lineInfo.snippet,
-                    remediation: 'Set spec.externalTrafficPolicy to Local'
+                    remediation: 'Avoid using externalIPs'
                 });
             }
         }
@@ -995,7 +749,6 @@
         function checkIngressSecurity(ingress) {
             const lineInfo = findLineInfo(ingress, 'kind', 'Ingress');
             
-            // TLS configuration
             if (!ingress.spec.tls || ingress.spec.tls.length === 0) {
                 addFinding({
                     id: 'Ingress-TLS',
@@ -1007,47 +760,7 @@
                     line: lineInfo.line,
                     column: lineInfo.column,
                     snippet: lineInfo.snippet,
-                    remediation: 'Configure TLS for the Ingress resource'
-                });
-            }
-            
-            // Default backend
-            if (ingress.spec.defaultBackend) {
-                addFinding({
-                    id: 'Ingress-DefaultBackend',
-                    title: 'Ingress with Default Backend',
-                    message: 'Ingress has a default backend that may expose unintended services',
-                    severity: 'Medium',
-                    resource: ingress.metadata?.name || 'Unknown',
-                    kind: ingress.kind || 'Unknown',
-                    line: lineInfo.line,
-                    column: lineInfo.column,
-                    snippet: lineInfo.snippet,
-                    remediation: 'Avoid using default backends or ensure they are properly secured'
-                });
-            }
-            
-            // Path type
-            if (ingress.spec.rules) {
-                ingress.spec.rules.forEach(rule => {
-                    if (rule.http && rule.http.paths) {
-                        rule.http.paths.forEach(path => {
-                            if (!path.pathType || path.pathType === 'ImplementationSpecific') {
-                                addFinding({
-                                    id: 'Ingress-PathType',
-                                    title: 'Ingress Path Type',
-                                    message: `Ingress path '${path.path}' has unspecified or ImplementationSpecific path type`,
-                                    severity: 'Low',
-                                    resource: ingress.metadata?.name || 'Unknown',
-                                    kind: ingress.kind || 'Unknown',
-                                    line: lineInfo.line,
-                                    column: lineInfo.column,
-                                    snippet: lineInfo.snippet,
-                                    remediation: 'Specify either Prefix or Exact path type for predictable routing'
-                                });
-                            }
-                        });
-                    }
+                    remediation: 'Configure TLS for the Ingress'
                 });
             }
         }
@@ -1055,7 +768,6 @@
         function checkRBACSecurity(role) {
             const lineInfo = findLineInfo(role, 'kind', role.kind);
             
-            // Wildcard resources
             if (role.rules) {
                 role.rules.forEach(rule => {
                     if (rule.resources && rule.resources.includes('*')) {
@@ -1069,11 +781,10 @@
                             line: lineInfo.line,
                             column: lineInfo.column,
                             snippet: lineInfo.snippet,
-                            remediation: 'Restrict resources to specific API groups and resource types'
+                            remediation: 'Restrict resources to specific types'
                         });
                     }
                     
-                    // Wildcard verbs
                     if (rule.verbs && rule.verbs.includes('*')) {
                         addFinding({
                             id: 'RBAC-Wildcard',
@@ -1085,23 +796,7 @@
                             line: lineInfo.line,
                             column: lineInfo.column,
                             snippet: lineInfo.snippet,
-                            remediation: 'Restrict verbs to only those needed (e.g., get, list)'
-                        });
-                    }
-                    
-                    // Wildcard API groups
-                    if (rule.apiGroups && rule.apiGroups.includes('*')) {
-                        addFinding({
-                            id: 'RBAC-Wildcard',
-                            title: 'RBAC Wildcard API Group',
-                            message: `${role.kind} allows access to all API groups`,
-                            severity: 'High',
-                            resource: role.metadata?.name || 'Unknown',
-                            kind: role.kind || 'Unknown',
-                            line: lineInfo.line,
-                            column: lineInfo.column,
-                            snippet: lineInfo.snippet,
-                            remediation: 'Restrict API groups to specific namespaces'
+                            remediation: 'Restrict verbs to only those needed'
                         });
                     }
                 });
@@ -1111,7 +806,6 @@
         function checkSecretSecurity(secret) {
             const lineInfo = findLineInfo(secret, 'kind', 'Secret');
             
-            // Opaque secrets with base64 data
             if (secret.type === 'Opaque' && secret.data) {
                 Object.keys(secret.data).forEach(key => {
                     try {
@@ -1120,32 +814,16 @@
                         addFinding({
                             id: 'Secret-Encoding',
                             title: 'Secret Encoding',
-                            message: `Secret '${secret.metadata.name}' contains non-base64 encoded data in key '${key}'`,
+                            message: `Secret contains non-base64 encoded data in key '${key}'`,
                             severity: 'Medium',
                             resource: secret.metadata?.name || 'Unknown',
                             kind: secret.kind || 'Unknown',
                             line: lineInfo.line,
                             column: lineInfo.column,
                             snippet: lineInfo.snippet,
-                            remediation: 'Ensure all secret data is properly base64 encoded'
+                            remediation: 'Ensure all secret data is base64 encoded'
                         });
                     }
-                });
-            }
-            
-            // StringData usage
-            if (secret.stringData) {
-                addFinding({
-                    id: 'Secret-StringData',
-                    title: 'Secret StringData',
-                    message: `Secret '${secret.metadata.name}' uses stringData which may expose values in process listings`,
-                    severity: 'Low',
-                    resource: secret.metadata?.name || 'Unknown',
-                    kind: secret.kind || 'Unknown',
-                    line: lineInfo.line,
-                    column: lineInfo.column,
-                    snippet: lineInfo.snippet,
-                    remediation: 'Use data field with base64 encoded values instead of stringData'
                 });
             }
         }
@@ -1153,7 +831,6 @@
         function checkConfigMapSecurity(configMap) {
             const lineInfo = findLineInfo(configMap, 'kind', 'ConfigMap');
             
-            // Sensitive data in ConfigMap
             if (configMap.data) {
                 Object.keys(configMap.data).forEach(key => {
                     SECRET_PATTERNS.forEach(p => {
@@ -1161,14 +838,14 @@
                             addFinding({
                                 id: 'ConfigMap-Secret',
                                 title: 'Sensitive Data in ConfigMap',
-                                message: `ConfigMap '${configMap.metadata.name}' may contain sensitive data in key '${key}'`,
+                                message: `ConfigMap may contain sensitive data in key '${key}'`,
                                 severity: 'High',
                                 resource: configMap.metadata?.name || 'Unknown',
                                 kind: configMap.kind || 'Unknown',
                                 line: lineInfo.line,
                                 column: lineInfo.column,
                                 snippet: lineInfo.snippet,
-                                remediation: 'Move sensitive data to Kubernetes Secrets'
+                                remediation: 'Move sensitive data to Secrets'
                             });
                         }
                     });
@@ -1179,102 +856,32 @@
         function checkServiceAccountSecurity(sa) {
             const lineInfo = findLineInfo(sa, 'kind', 'ServiceAccount');
             
-            // Automount token
             if (sa.automountServiceAccountToken !== false) {
                 addFinding({
                     id: 'ServiceAccount-Token',
                     title: 'Service Account Token',
-                    message: `ServiceAccount '${sa.metadata.name}' automatically mounts API credentials`,
+                    message: 'ServiceAccount automatically mounts API credentials',
                     severity: 'Medium',
                     resource: sa.metadata?.name || 'Unknown',
                     kind: sa.kind || 'Unknown',
                     line: lineInfo.line,
                     column: lineInfo.column,
                     snippet: lineInfo.snippet,
-                    remediation: 'Set automountServiceAccountToken to false if not needed'
-                });
-            }
-            
-            // Image pull secrets
-            if (sa.imagePullSecrets && sa.imagePullSecrets.length > 0) {
-                addFinding({
-                    id: 'ServiceAccount-ImagePull',
-                    title: 'Service Account Image Pull',
-                    message: `ServiceAccount '${sa.metadata.name}' contains image pull secrets`,
-                    severity: 'Low',
-                    resource: sa.metadata?.name || 'Unknown',
-                    kind: sa.kind || 'Unknown',
-                    line: lineInfo.line,
-                    column: lineInfo.column,
-                    snippet: lineInfo.snippet,
-                    remediation: 'Ensure image pull secrets are properly scoped and secured'
-                });
-            }
-        }
-
-        function checkPodSecurityPolicy(psp) {
-            const lineInfo = findLineInfo(psp, 'kind', 'PodSecurityPolicy');
-            
-            // Privileged access
-            if (psp.spec.privileged) {
-                addFinding({
-                    id: 'PSP-Privileged',
-                    title: 'Privileged Pod Security Policy',
-                    message: `PodSecurityPolicy '${psp.metadata.name}' allows privileged containers`,
-                    severity: 'High',
-                    resource: psp.metadata?.name || 'Unknown',
-                    kind: psp.kind || 'Unknown',
-                    line: lineInfo.line,
-                    column: lineInfo.column,
-                    snippet: lineInfo.snippet,
-                    remediation: 'Set privileged to false in PodSecurityPolicy'
-                });
-            }
-            
-            // Host namespaces
-            if (psp.spec.hostPID || psp.spec.hostIPC || psp.spec.hostNetwork) {
-                addFinding({
-                    id: 'PSP-HostNamespace',
-                    title: 'Host Namespace Access',
-                    message: `PodSecurityPolicy '${psp.metadata.name}' allows host namespace access`,
-                    severity: 'High',
-                    resource: psp.metadata?.name || 'Unknown',
-                    kind: psp.kind || 'Unknown',
-                    line: lineInfo.line,
-                    column: lineInfo.column,
-                    snippet: lineInfo.snippet,
-                    remediation: 'Restrict host namespace access in PodSecurityPolicy'
-                });
-            }
-            
-            // Volume types
-            if (psp.spec.volumes && psp.spec.volumes.includes('*')) {
-                addFinding({
-                    id: 'PSP-Volumes',
-                    title: 'All Volume Types',
-                    message: `PodSecurityPolicy '${psp.metadata.name}' allows all volume types`,
-                    severity: 'Medium',
-                    resource: psp.metadata?.name || 'Unknown',
-                    kind: psp.kind || 'Unknown',
-                    line: lineInfo.line,
-                    column: lineInfo.column,
-                    snippet: lineInfo.snippet,
-                    remediation: 'Restrict allowed volume types in PodSecurityPolicy'
+                    remediation: 'Set automountServiceAccountToken to false'
                 });
             }
         }
 
         function checkGenericResourceSecurity(resource) {
-            // Generic checks for any Kubernetes resource
             const lineInfo = findLineInfo(resource, 'kind', resource.kind);
             
-            // Missing namespace
-            if (resource.metadata && !resource.metadata.namespace && resource.kind !== 'Namespace' && 
-                resource.kind !== 'ClusterRole' && resource.kind !== 'ClusterRoleBinding') {
+            if (resource.metadata && !resource.metadata.namespace && 
+                resource.kind !== 'Namespace' && resource.kind !== 'ClusterRole' && 
+                resource.kind !== 'ClusterRoleBinding') {
                 addFinding({
                     id: 'Generic-Namespace',
                     title: 'Missing Namespace',
-                    message: `${resource.kind} '${resource.metadata.name}' is not assigned to a namespace`,
+                    message: `${resource.kind} is not assigned to a namespace`,
                     severity: 'Low',
                     resource: resource.metadata?.name || 'Unknown',
                     kind: resource.kind || 'Unknown',
@@ -1284,54 +891,11 @@
                     remediation: 'Specify a namespace for the resource'
                 });
             }
-            
-            // Missing labels
-            if (resource.metadata && (!resource.metadata.labels || Object.keys(resource.metadata.labels).length === 0)) {
-                addFinding({
-                    id: 'Generic-Labels',
-                    title: 'Missing Labels',
-                    message: `${resource.kind} '${resource.metadata.name}' has no labels`,
-                    severity: 'Low',
-                    resource: resource.metadata?.name || 'Unknown',
-                    kind: resource.kind || 'Unknown',
-                    line: lineInfo.line,
-                    column: lineInfo.column,
-                    snippet: lineInfo.snippet,
-                    remediation: 'Add meaningful labels to the resource'
-                });
-            }
         }
 
         function checkGenericYamlSecurity(doc) {
-            // Checks for non-Kubernetes YAML/JSON
             const lineInfo = findLineInfo(doc, 'kind', 'Generic');
-            
-            // Check for plaintext secrets
             scanSecrets(doc);
-            
-            // Check for insecure configurations
-            if (typeof doc === 'object') {
-                Object.keys(doc).forEach(key => {
-                    if (typeof doc[key] === 'string') {
-                        if (key.toLowerCase().includes('password') || 
-                            key.toLowerCase().includes('secret') || 
-                            key.toLowerCase().includes('token')) {
-                            addFinding({
-                                id: 'Generic-SecretKey',
-                                title: 'Potential Secret Key',
-                                message: `Key '${key}' may contain sensitive data`,
-                                severity: 'Medium',
-                                resource: 'Generic',
-                                kind: 'YAML/JSON',
-                                line: lineInfo.line,
-                                column: lineInfo.column,
-                                snippet: lineInfo.snippet,
-                                remediation: 'Avoid storing secrets in plaintext configuration'
-                            });
-                        }
-                    }
-                });
-            }
         }
 
         function addFinding(finding) {
@@ -1350,7 +914,6 @@
         }
 
         function addAutoFix(resource, patch) {
-            // Find existing auto-fix for this resource
             let fix = autoFixes.find(f => 
                 f.resource.metadata?.name === resource.metadata?.name && 
                 f.resource.kind === resource.kind
@@ -1368,25 +931,27 @@
         }
 
         function findLineInfo(obj, key, value) {
-            // Simple line finder - in a real implementation, you'd want a more sophisticated approach
-            const jsonString = JSON.stringify(obj);
-            const searchString = `"${key}":${JSON.stringify(value)}`;
-            const index = originalConfig.indexOf(searchString);
-            
-            if (index === -1) {
+            try {
+                const jsonString = JSON.stringify(obj);
+                const searchString = `"${key}":${JSON.stringify(value)}`;
+                const index = originalConfig.indexOf(searchString);
+                
+                if (index === -1) {
+                    return { line: 'N/A', column: 'N/A', snippet: 'N/A' };
+                }
+                
+                const linesBefore = originalConfig.substring(0, index).split('\n');
+                const line = linesBefore.length;
+                const column = linesBefore[linesBefore.length - 1].length + 1;
+                
+                const startLine = Math.max(0, line - 2);
+                const endLine = Math.min(configLines.length, line + 2);
+                const snippet = configLines.slice(startLine, endLine).join('\n');
+                
+                return { line, column, snippet };
+            } catch (e) {
                 return { line: 'N/A', column: 'N/A', snippet: 'N/A' };
             }
-            
-            const linesBefore = originalConfig.substring(0, index).split('\n');
-            const line = linesBefore.length;
-            const column = linesBefore[linesBefore.length - 1].length + 1;
-            
-            // Get snippet of surrounding lines
-            const startLine = Math.max(0, line - 2);
-            const endLine = Math.min(configLines.length, line + 2);
-            const snippet = configLines.slice(startLine, endLine).join('\n');
-            
-            return { line, column, snippet };
         }
 
         function renderResults() {
@@ -1399,7 +964,6 @@
                 return;
             }
             
-            // Count findings by severity
             const severityCounts = {
                 Critical: 0,
                 High: 0,
@@ -1410,7 +974,6 @@
             
             findings.forEach(f => severityCounts[f.severity]++);
             
-            // Render summary
             summaryDiv.innerHTML = `
                 <div class="summary-card">
                     <div class="summary-item Critical">
@@ -1436,7 +999,6 @@
                 </div>
             `;
             
-            // Render table
             let tableHTML = `
                 <table>
                     <thead>
@@ -1468,17 +1030,12 @@
                         <td>${finding.message}</td>
                         <td>${finding.remediation}</td>
                     </tr>
+                    <tr class="snippet-row">
+                        <td colspan="8">
+                            <pre>${finding.snippet || 'N/A'}</pre>
+                        </td>
+                    </tr>
                 `;
-                
-                if (finding.snippet !== 'N/A') {
-                    tableHTML += `
-                        <tr class="snippet">
-                            <td colspan="8">
-                                <pre>${finding.snippet}</pre>
-                            </td>
-                        </tr>
-                    `;
-                }
             });
             
             tableHTML += `
@@ -1527,7 +1084,8 @@
                 Kind: f.kind,
                 Location: f.line !== 'N/A' ? `Line ${f.line}` : 'N/A',
                 Message: f.message,
-                Remediation: f.remediation
+                Remediation: f.remediation,
+                Snippet: f.snippet || 'N/A'
             }));
             
             const csv = Papa.unparse(csvData);
@@ -1554,12 +1112,13 @@
                 f.kind,
                 f.line !== 'N/A' ? `Line ${f.line}` : 'N/A',
                 f.message,
-                f.remediation
+                f.remediation,
+                f.snippet || 'N/A'
             ]);
             
             const wb = XLSX.utils.book_new();
             const ws = XLSX.utils.aoa_to_sheet([
-                ['Severity', 'ID', 'Title', 'Resource', 'Kind', 'Location', 'Message', 'Remediation'],
+                ['Severity', 'ID', 'Title', 'Resource', 'Kind', 'Location', 'Message', 'Remediation', 'Snippet'],
                 ...excelData
             ]);
             
@@ -1573,7 +1132,6 @@
                 return;
             }
             
-            // Apply patches to resources
             const fixedResources = autoFixes.map(fix => {
                 const resource = JSON.parse(JSON.stringify(fix.resource));
                 
@@ -1585,7 +1143,6 @@
                         const part = pathParts[i];
                         
                         if (part.startsWith('[') && part.endsWith(']')) {
-                            // Array selector like [name=container]
                             const selector = part.substring(1, part.length - 1);
                             const [key, value] = selector.split('=');
                             current = current.find(item => item[key] === value);
@@ -1609,10 +1166,8 @@
                 return resource;
             });
             
-            // Convert to YAML
             const fixedYaml = fixedResources.map(r => jsyaml.dump(r)).join('---\n');
             
-            // Download
             const blob = new Blob([fixedYaml], { type: 'text/yaml' });
             const url = URL.createObjectURL(blob);
             const link = document.createElement('a');
