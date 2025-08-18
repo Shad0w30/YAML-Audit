@@ -1,0 +1,1626 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advanced Kubernetes Security Scanner</title>
+    <script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        textarea { width: 100%; height: 200px; margin-bottom: 10px; }
+        button { padding: 8px 15px; margin-right: 10px; margin-bottom: 20px; }
+        .tab { overflow: hidden; border: 1px solid #ccc; background-color: #f1f1f1; }
+        .tab button { background-color: inherit; float: left; border: none; outline: none; cursor: pointer; padding: 14px 16px; transition: 0.3s; }
+        .tab button:hover { background-color: #ddd; }
+        .tab button.active { background-color: #ccc; }
+        .tabcontent { display: none; padding: 6px 12px; border: 1px solid #ccc; border-top: none; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background-color: #f2f2f2; }
+        tr:nth-child(even) { background-color: #f9f9f9; }
+        .Critical { background-color: #ffcccc; }
+        .High { background-color: #ffddcc; }
+        .Medium { background-color: #fff2cc; }
+        .Low { background-color: #e6ffe6; }
+        .Info { background-color: #e6f3ff; }
+        .line-highlight { background-color: #ffff99; font-weight: bold; }
+        .summary-card { 
+            padding: 15px; 
+            margin-bottom: 20px; 
+            border-radius: 5px; 
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1); 
+            display: flex; 
+            justify-content: space-between;
+        }
+        .summary-item { text-align: center; padding: 10px; }
+        .summary-count { font-size: 24px; font-weight: bold; }
+        .summary-label { font-size: 14px; }
+    </style>
+</head>
+<body>
+    <h1>Advanced Kubernetes Security Scanner</h1>
+    
+    <div class="tab">
+        <button class="tablinks active" onclick="openTab(event, 'inputTab')">Input</button>
+        <button class="tablinks" onclick="openTab(event, 'resultsTab')">Results</button>
+        <button class="tablinks" onclick="openTab(event, 'fixesTab')">Auto-Fixes</button>
+    </div>
+    
+    <div id="inputTab" class="tabcontent" style="display: block;">
+        <p>Paste your Kubernetes YAML or JSON configuration below:</p>
+        <textarea id="configInput" placeholder="Paste YAML or JSON here..."></textarea>
+        <div>
+            <button onclick="scanConfig()">Scan Configuration</button>
+            <select id="inputType">
+                <option value="yaml">YAML</option>
+                <option value="json">JSON</option>
+            </select>
+        </div>
+    </div>
+    
+    <div id="resultsTab" class="tabcontent">
+        <div id="summary"></div>
+        <div id="results"></div>
+        <button onclick="downloadCSV()">Download as CSV</button>
+        <button onclick="downloadExcel()">Download as Excel</button>
+    </div>
+    
+    <div id="fixesTab" class="tabcontent">
+        <h2>Auto-Fixes</h2>
+        <div id="autoFixes"></div>
+        <button onclick="downloadAutoFixes()">Download Fixed Config</button>
+    </div>
+
+    <script>
+        const CIS_MAP = {
+            // Container Security
+            privileged: { id: 'CIS 5.2.1', title: 'Privileged Container' },
+            allowPrivilegeEscalation: { id: 'CIS 5.2.6', title: 'Allow Privilege Escalation' },
+            runAsRoot: { id: 'CIS 5.2.5', title: 'Run as Root User' },
+            readOnlyRootFS: { id: 'CIS 5.2.7', title: 'Read-only Root Filesystem' },
+            capabilities: { id: 'CIS 5.2.8/5.2.9', title: 'Dangerous Capabilities' },
+            seLinuxOptions: { id: 'CIS 5.2.10', title: 'SELinux Context Options' },
+            procMount: { id: 'CIS 5.2.11', title: '/proc Mount Type' },
+            
+            // Resource Management
+            resourceLimits: { id: 'CIS 5.1.1', title: 'Resource Limits' },
+            resourceLimitsCPU: { id: 'CIS 5.1.2', title: 'CPU Limits' },
+            resourceLimitsMemory: { id: 'CIS 5.1.3', title: 'Memory Limits' },
+            
+            // Image Management
+            imageLatestTag: { id: 'CIS 5.4.1', title: 'Latest Image Tag' },
+            imageDigest: { id: 'CIS 5.4.2', title: 'Image Digest' },
+            
+            // Pod Security
+            hostNamespace: { id: 'CIS 5.2.2/5.2.3/5.2.4', title: 'Host Namespace Sharing' },
+            defaultServiceAccount: { id: 'CIS 5.1.5', title: 'Default Service Account' },
+            hostPathVolume: { id: 'CIS 5.3.6', title: 'HostPath Volume' },
+            missingProbes: { id: 'CIS 5.7.4', title: 'Missing Health Probes' },
+            
+            // Network Security
+            networkPolicy: { id: 'CIS 6.3.1', title: 'Network Policy' },
+            hostPort: { id: 'CIS 5.3.5', title: 'Host Port Usage' },
+            
+            // Secrets Management
+            secretsEnv: { id: 'CIS 5.5.1', title: 'Secrets in Environment Variables' },
+            secretsVolume: { id: 'CIS 5.5.2', title: 'Secrets Mounted as Volumes' },
+            
+            // General Security
+            appArmor: { id: 'CIS 5.2.12', title: 'AppArmor Profile' },
+            seccomp: { id: 'CIS 5.2.13', title: 'Seccomp Profile' },
+            podSecurityPolicy: { id: 'CIS 5.2.14', title: 'Pod Security Policy' }
+        };
+
+        const SECRET_PATTERNS = [
+            { regex: /AKIA[0-9A-Z]{16}/, desc: 'AWS Access Key ID' },
+            { regex: /[0-9a-zA-Z/+]{40}/, desc: 'AWS Secret Access Key' },
+            { regex: /-----BEGIN (RSA|EC|DSA|PGP) PRIVATE KEY-----/, desc: 'Private Key' },
+            { regex: /-----BEGIN CERTIFICATE-----/, desc: 'Certificate' },
+            { regex: /eyJhbGciOiJ[^\s"]*/, desc: 'JWT Token' },
+            { regex: /(?:http|https):\/\/[^\s]+/, desc: 'URL with potential credentials' },
+            { regex: /(?:password|passwd|pwd|secret|token|key|credential)[^a-zA-Z0-9][^'"\n]*[=:][^'"\n]*/, desc: 'Potential credential' },
+            { regex: /(?:api[_-]?key|access[_-]?token|secret[_-]?key)/i, desc: 'API key reference' },
+            { regex: /(?:github|gitlab|bitbucket)[^a-zA-Z0-9].*(?:token|key|password)/i, desc: 'Git credential' },
+            { regex: /(?:database|db)[^a-zA-Z0-9].*(?:password|pwd|user|url)/i, desc: 'Database credential' }
+        ];
+
+        const DANGEROUS_CAPABILITIES = [
+            'ALL', 'NET_ADMIN', 'NET_RAW', 'SYS_ADMIN', 'SYS_MODULE', 
+            'SYS_PTRACE', 'SYS_RAWIO', 'SYS_CHROOT', 'DAC_OVERRIDE',
+            'FOWNER', 'SETUID', 'SETGID', 'KILL', 'MKNOD', 'AUDIT_CONTROL',
+            'MAC_ADMIN', 'MAC_OVERRIDE'
+        ];
+
+        let findings = [];
+        let autoFixes = [];
+        let originalConfig = '';
+        let configLines = [];
+
+        function openTab(evt, tabName) {
+            const tabcontent = document.getElementsByClassName("tabcontent");
+            for (let i = 0; i < tabcontent.length; i++) {
+                tabcontent[i].style.display = "none";
+            }
+            
+            const tablinks = document.getElementsByClassName("tablinks");
+            for (let i = 0; i < tablinks.length; i++) {
+                tablinks[i].className = tablinks[i].className.replace(" active", "");
+            }
+            
+            document.getElementById(tabName).style.display = "block";
+            evt.currentTarget.className += " active";
+        }
+
+        function scanConfig() {
+            const configContent = document.getElementById('configInput').value;
+            originalConfig = configContent;
+            configLines = configContent.split('\n');
+            const inputType = document.getElementById('inputType').value;
+            
+            let docs;
+            try {
+                if (inputType === 'yaml') {
+                    docs = jsyaml.loadAll(configContent);
+                } else {
+                    docs = [JSON.parse(configContent)];
+                }
+            } catch (e) {
+                alert(`Invalid ${inputType.toUpperCase()}: ${e.message}`);
+                return;
+            }
+
+            findings = [];
+            autoFixes = [];
+
+            docs.forEach((doc, docIndex) => {
+                if (!doc || typeof doc !== 'object') return;
+
+                // Check for common Kubernetes resource types
+                if (doc.kind) {
+                    switch(doc.kind.toLowerCase()) {
+                        case 'pod':
+                            checkPodSecurity(doc);
+                            break;
+                        case 'deployment':
+                        case 'statefulset':
+                        case 'daemonset':
+                        case 'replicaset':
+                        case 'job':
+                        case 'cronjob':
+                            checkWorkloadSecurity(doc);
+                            break;
+                        case 'service':
+                            checkServiceSecurity(doc);
+                            break;
+                        case 'ingress':
+                            checkIngressSecurity(doc);
+                            break;
+                        case 'networkpolicy':
+                            checkNetworkPolicy(doc);
+                            break;
+                        case 'role':
+                        case 'clusterrole':
+                            checkRBACSecurity(doc);
+                            break;
+                        case 'secret':
+                            checkSecretSecurity(doc);
+                            break;
+                        case 'configmap':
+                            checkConfigMapSecurity(doc);
+                            break;
+                        case 'serviceaccount':
+                            checkServiceAccountSecurity(doc);
+                            break;
+                        case 'podsecuritypolicy':
+                            checkPodSecurityPolicy(doc);
+                            break;
+                        default:
+                            checkGenericResourceSecurity(doc);
+                    }
+                } else {
+                    // Generic security checks for non-Kubernetes YAML/JSON
+                    checkGenericYamlSecurity(doc);
+                }
+
+                // Always scan for secrets
+                scanSecrets(doc);
+            });
+
+            renderResults();
+            renderAutoFixes();
+        }
+
+        function checkPodSecurity(pod) {
+            const spec = pod.spec || {};
+            
+            // Check security contexts
+            checkPodSecurityContext(spec.securityContext, pod);
+            
+            // Check containers
+            if (spec.containers) {
+                spec.containers.forEach(container => {
+                    checkContainerSecurity(container, pod);
+                });
+            }
+            
+            // Check init containers
+            if (spec.initContainers) {
+                spec.initContainers.forEach(container => {
+                    checkContainerSecurity(container, pod);
+                });
+            }
+            
+            // Check volumes
+            if (spec.volumes) {
+                checkVolumes(spec.volumes, pod);
+            }
+            
+            // Check host namespaces
+            checkHostNamespaces(spec, pod);
+            
+            // Check service account
+            checkServiceAccount(spec, pod);
+            
+            // Check affinity/anti-affinity
+            if (spec.affinity) {
+                checkAffinity(spec.affinity, pod);
+            }
+        }
+
+        function checkWorkloadSecurity(workload) {
+            const template = workload.spec?.template;
+            if (template && template.spec) {
+                checkPodSecurity({ 
+                    kind: 'Pod', 
+                    metadata: template.metadata, 
+                    spec: template.spec 
+                });
+            }
+            
+            // Workload-specific checks
+            if (workload.kind.toLowerCase() === 'cronjob') {
+                const jobTemplate = workload.spec?.jobTemplate;
+                if (jobTemplate && jobTemplate.spec?.template?.spec) {
+                    checkPodSecurity({ 
+                        kind: 'Pod', 
+                        metadata: jobTemplate.spec.template.metadata, 
+                        spec: jobTemplate.spec.template.spec 
+                    });
+                }
+            }
+        }
+
+        function checkContainerSecurity(container, parentResource) {
+            const ctx = container.securityContext || {};
+            const lineInfo = findLineInfo(container, 'name', container.name);
+            
+            // Privileged container
+            if (ctx.privileged) {
+                addFinding({
+                    id: CIS_MAP.privileged.id,
+                    title: CIS_MAP.privileged.title,
+                    message: `Container '${container.name}' is running in privileged mode`,
+                    severity: 'High',
+                    resource: parentResource.metadata?.name || 'Unknown',
+                    kind: parentResource.kind || 'Unknown',
+                    line: lineInfo.line,
+                    column: lineInfo.column,
+                    snippet: lineInfo.snippet,
+                    remediation: 'Set securityContext.privileged to false'
+                });
+                
+                // Add auto-fix
+                addAutoFix(parentResource, {
+                    path: `/spec/template/spec/containers/[name=${container.name}]/securityContext/privileged`,
+                    value: false,
+                    op: 'replace'
+                });
+            }
+            
+            // Allow privilege escalation
+            if (ctx.allowPrivilegeEscalation !== false) {
+                addFinding({
+                    id: CIS_MAP.allowPrivilegeEscalation.id,
+                    title: CIS_MAP.allowPrivilegeEscalation.title,
+                    message: `Container '${container.name}' allows privilege escalation`,
+                    severity: ctx.allowPrivilegeEscalation ? 'High' : 'Medium',
+                    resource: parentResource.metadata?.name || 'Unknown',
+                    kind: parentResource.kind || 'Unknown',
+                    line: lineInfo.line,
+                    column: lineInfo.column,
+                    snippet: lineInfo.snippet,
+                    remediation: 'Set securityContext.allowPrivilegeEscalation to false'
+                });
+                
+                addAutoFix(parentResource, {
+                    path: `/spec/template/spec/containers/[name=${container.name}]/securityContext/allowPrivilegeEscalation`,
+                    value: false,
+                    op: 'replace'
+                });
+            }
+            
+            // Run as root
+            if (ctx.runAsUser === 0 || ctx.runAsUser === '0') {
+                addFinding({
+                    id: CIS_MAP.runAsRoot.id,
+                    title: CIS_MAP.runAsRoot.title,
+                    message: `Container '${container.name}' is running as root user (runAsUser=0)`,
+                    severity: 'High',
+                    resource: parentResource.metadata?.name || 'Unknown',
+                    kind: parentResource.kind || 'Unknown',
+                    line: lineInfo.line,
+                    column: lineInfo.column,
+                    snippet: lineInfo.snippet,
+                    remediation: 'Set securityContext.runAsUser to a non-zero value'
+                });
+                
+                addAutoFix(parentResource, {
+                    path: `/spec/template/spec/containers/[name=${container.name}]/securityContext/runAsUser`,
+                    value: 1000,
+                    op: 'replace'
+                });
+            }
+            
+            // Read-only root filesystem
+            if (ctx.readOnlyRootFilesystem !== true) {
+                addFinding({
+                    id: CIS_MAP.readOnlyRootFS.id,
+                    title: CIS_MAP.readOnlyRootFS.title,
+                    message: `Container '${container.name}' does not have a read-only root filesystem`,
+                    severity: 'Medium',
+                    resource: parentResource.metadata?.name || 'Unknown',
+                    kind: parentResource.kind || 'Unknown',
+                    line: lineInfo.line,
+                    column: lineInfo.column,
+                    snippet: lineInfo.snippet,
+                    remediation: 'Set securityContext.readOnlyRootFilesystem to true'
+                });
+                
+                addAutoFix(parentResource, {
+                    path: `/spec/template/spec/containers/[name=${container.name}]/securityContext/readOnlyRootFilesystem`,
+                    value: true,
+                    op: 'replace'
+                });
+            }
+            
+            // Dangerous capabilities
+            if (ctx.capabilities && ctx.capabilities.add) {
+                const dangerousCaps = ctx.capabilities.add.filter(cap => 
+                    DANGEROUS_CAPABILITIES.includes(cap.toUpperCase())
+                );
+                
+                if (dangerousCaps.length > 0) {
+                    addFinding({
+                        id: CIS_MAP.capabilities.id,
+                        title: CIS_MAP.capabilities.title,
+                        message: `Container '${container.name}' has dangerous capabilities: ${dangerousCaps.join(', ')}`,
+                        severity: 'High',
+                        resource: parentResource.metadata?.name || 'Unknown',
+                        kind: parentResource.kind || 'Unknown',
+                        line: lineInfo.line,
+                        column: lineInfo.column,
+                        snippet: lineInfo.snippet,
+                        remediation: 'Remove dangerous capabilities from securityContext.capabilities.add'
+                    });
+                    
+                    addAutoFix(parentResource, {
+                        path: `/spec/template/spec/containers/[name=${container.name}]/securityContext/capabilities/add`,
+                        value: ctx.capabilities.add.filter(cap => 
+                            !DANGEROUS_CAPABILITIES.includes(cap.toUpperCase())
+                        ),
+                        op: 'replace'
+                    });
+                }
+            }
+            
+            // Missing capabilities.drop
+            if (!ctx.capabilities || !ctx.capabilities.drop || !ctx.capabilities.drop.includes('ALL')) {
+                addFinding({
+                    id: CIS_MAP.capabilities.id,
+                    title: CIS_MAP.capabilities.title,
+                    message: `Container '${container.name}' does not drop all capabilities by default`,
+                    severity: 'Medium',
+                    resource: parentResource.metadata?.name || 'Unknown',
+                    kind: parentResource.kind || 'Unknown',
+                    line: lineInfo.line,
+                    column: lineInfo.column,
+                    snippet: lineInfo.snippet,
+                    remediation: 'Add ALL to securityContext.capabilities.drop'
+                });
+                
+                const newDrop = ctx.capabilities?.drop || [];
+                if (!newDrop.includes('ALL')) {
+                    newDrop.push('ALL');
+                }
+                
+                addAutoFix(parentResource, {
+                    path: `/spec/template/spec/containers/[name=${container.name}]/securityContext/capabilities/drop`,
+                    value: newDrop,
+                    op: 'replace'
+                });
+            }
+            
+            // Resource limits
+            if (!container.resources || !container.resources.limits) {
+                addFinding({
+                    id: CIS_MAP.resourceLimits.id,
+                    title: CIS_MAP.resourceLimits.title,
+                    message: `Container '${container.name}' has no resource limits defined`,
+                    severity: 'Medium',
+                    resource: parentResource.metadata?.name || 'Unknown',
+                    kind: parentResource.kind || 'Unknown',
+                    line: lineInfo.line,
+                    column: lineInfo.column,
+                    snippet: lineInfo.snippet,
+                    remediation: 'Define resource limits for the container'
+                });
+                
+                addAutoFix(parentResource, {
+                    path: `/spec/template/spec/containers/[name=${container.name}]/resources/limits`,
+                    value: { cpu: '500m', memory: '512Mi' },
+                    op: 'add'
+                });
+            } else {
+                if (!container.resources.limits.cpu) {
+                    addFinding({
+                        id: CIS_MAP.resourceLimitsCPU.id,
+                        title: CIS_MAP.resourceLimitsCPU.title,
+                        message: `Container '${container.name}' has no CPU limit defined`,
+                        severity: 'Medium',
+                        resource: parentResource.metadata?.name || 'Unknown',
+                        kind: parentResource.kind || 'Unknown',
+                        line: lineInfo.line,
+                        column: lineInfo.column,
+                        snippet: lineInfo.snippet,
+                        remediation: 'Define CPU limit for the container'
+                    });
+                    
+                    addAutoFix(parentResource, {
+                        path: `/spec/template/spec/containers/[name=${container.name}]/resources/limits/cpu`,
+                        value: '500m',
+                        op: 'add'
+                    });
+                }
+                
+                if (!container.resources.limits.memory) {
+                    addFinding({
+                        id: CIS_MAP.resourceLimitsMemory.id,
+                        title: CIS_MAP.resourceLimitsMemory.title,
+                        message: `Container '${container.name}' has no memory limit defined`,
+                        severity: 'Medium',
+                        resource: parentResource.metadata?.name || 'Unknown',
+                        kind: parentResource.kind || 'Unknown',
+                        line: lineInfo.line,
+                        column: lineInfo.column,
+                        snippet: lineInfo.snippet,
+                        remediation: 'Define memory limit for the container'
+                    });
+                    
+                    addAutoFix(parentResource, {
+                        path: `/spec/template/spec/containers/[name=${container.name}]/resources/limits/memory`,
+                        value: '512Mi',
+                        op: 'add'
+                    });
+                }
+            }
+            
+            // Health probes
+            if (!container.livenessProbe) {
+                addFinding({
+                    id: CIS_MAP.missingProbes.id,
+                    title: CIS_MAP.missingProbes.title,
+                    message: `Container '${container.name}' has no liveness probe defined`,
+                    severity: 'Medium',
+                    resource: parentResource.metadata?.name || 'Unknown',
+                    kind: parentResource.kind || 'Unknown',
+                    line: lineInfo.line,
+                    column: lineInfo.column,
+                    snippet: lineInfo.snippet,
+                    remediation: 'Define a liveness probe for the container'
+                });
+                
+                addAutoFix(parentResource, {
+                    path: `/spec/template/spec/containers/[name=${container.name}]/livenessProbe`,
+                    value: {
+                        httpGet: { path: '/healthz', port: 8080 },
+                        initialDelaySeconds: 15,
+                        periodSeconds: 10
+                    },
+                    op: 'add'
+                });
+            }
+            
+            if (!container.readinessProbe) {
+                addFinding({
+                    id: CIS_MAP.missingProbes.id,
+                    title: CIS_MAP.missingProbes.title,
+                    message: `Container '${container.name}' has no readiness probe defined`,
+                    severity: 'Medium',
+                    resource: parentResource.metadata?.name || 'Unknown',
+                    kind: parentResource.kind || 'Unknown',
+                    line: lineInfo.line,
+                    column: lineInfo.column,
+                    snippet: lineInfo.snippet,
+                    remediation: 'Define a readiness probe for the container'
+                });
+                
+                addAutoFix(parentResource, {
+                    path: `/spec/template/spec/containers/[name=${container.name}]/readinessProbe`,
+                    value: {
+                        httpGet: { path: '/ready', port: 8080 },
+                        initialDelaySeconds: 5,
+                        periodSeconds: 5
+                    },
+                    op: 'add'
+                });
+            }
+            
+            // Image tag
+            if (container.image && (container.image.endsWith(':latest') || !container.image.includes(':')) {
+                addFinding({
+                    id: CIS_MAP.imageLatestTag.id,
+                    title: CIS_MAP.imageLatestTag.title,
+                    message: `Container '${container.name}' is using the 'latest' tag or no tag`,
+                    severity: 'Medium',
+                    resource: parentResource.metadata?.name || 'Unknown',
+                    kind: parentResource.kind || 'Unknown',
+                    line: lineInfo.line,
+                    column: lineInfo.column,
+                    snippet: lineInfo.snippet,
+                    remediation: 'Use a specific immutable image tag or digest'
+                });
+            }
+            
+            // Image digest
+            if (container.image && !container.image.includes('@sha256:')) {
+                addFinding({
+                    id: CIS_MAP.imageDigest.id,
+                    title: CIS_MAP.imageDigest.title,
+                    message: `Container '${container.name}' is not using an image digest`,
+                    severity: 'Low',
+                    resource: parentResource.metadata?.name || 'Unknown',
+                    kind: parentResource.kind || 'Unknown',
+                    line: lineInfo.line,
+                    column: lineInfo.column,
+                    snippet: lineInfo.snippet,
+                    remediation: 'Use an image with digest (e.g., image@sha256:abc123...)'
+                });
+            }
+            
+            // Volume mounts
+            if (container.volumeMounts) {
+                container.volumeMounts.forEach(mount => {
+                    const vol = parentResource.spec?.volumes?.find(v => v.name === mount.name);
+                    if (vol?.hostPath) {
+                        addFinding({
+                            id: CIS_MAP.hostPathVolume.id,
+                            title: CIS_MAP.hostPathVolume.title,
+                            message: `Container '${container.name}' mounts hostPath volume '${vol.name}' at '${mount.mountPath}'`,
+                            severity: 'High',
+                            resource: parentResource.metadata?.name || 'Unknown',
+                            kind: parentResource.kind || 'Unknown',
+                            line: lineInfo.line,
+                            column: lineInfo.column,
+                            snippet: lineInfo.snippet,
+                            remediation: 'Avoid using hostPath volumes or restrict them to specific paths'
+                        });
+                    }
+                    
+                    if (mount.mountPath === '/var/run/secrets/kubernetes.io/serviceaccount') {
+                        addFinding({
+                            id: CIS_MAP.defaultServiceAccount.id,
+                            title: CIS_MAP.defaultServiceAccount.title,
+                            message: `Container '${container.name}' mounts the default service account token`,
+                            severity: 'Medium',
+                            resource: parentResource.metadata?.name || 'Unknown',
+                            kind: parentResource.kind || 'Unknown',
+                            line: lineInfo.line,
+                            column: lineInfo.column,
+                            snippet: lineInfo.snippet,
+                            remediation: 'Set automountServiceAccountToken to false or use a dedicated service account'
+                        });
+                    }
+                });
+            }
+            
+            // Environment variables with secrets
+            if (container.env) {
+                container.env.forEach(envVar => {
+                    if (envVar.valueFrom?.secretKeyRef) {
+                        addFinding({
+                            id: CIS_MAP.secretsEnv.id,
+                            title: CIS_MAP.secretsEnv.title,
+                            message: `Container '${container.name}' uses secret '${envVar.valueFrom.secretKeyRef.name}' in environment variable '${envVar.name}'`,
+                            severity: 'Medium',
+                            resource: parentResource.metadata?.name || 'Unknown',
+                            kind: parentResource.kind || 'Unknown',
+                            line: lineInfo.line,
+                            column: lineInfo.column,
+                            snippet: lineInfo.snippet,
+                            remediation: 'Consider using projected volumes with secret files instead of environment variables'
+                        });
+                    }
+                });
+            }
+        }
+
+        function checkPodSecurityContext(ctx, pod) {
+            if (!ctx) return;
+            
+            const lineInfo = findLineInfo(pod.spec, 'securityContext');
+            
+            // Run as non-root
+            if (ctx.runAsNonRoot !== true) {
+                addFinding({
+                    id: CIS_MAP.runAsRoot.id,
+                    title: CIS_MAP.runAsRoot.title,
+                    message: 'Pod does not enforce running as non-root user',
+                    severity: 'High',
+                    resource: pod.metadata?.name || 'Unknown',
+                    kind: pod.kind || 'Unknown',
+                    line: lineInfo.line,
+                    column: lineInfo.column,
+                    snippet: lineInfo.snippet,
+                    remediation: 'Set securityContext.runAsNonRoot to true'
+                });
+                
+                addAutoFix(pod, {
+                    path: '/spec/securityContext/runAsNonRoot',
+                    value: true,
+                    op: 'add'
+                });
+            }
+            
+            // Seccomp profile
+            if (!ctx.seccompProfile || ctx.seccompProfile.type !== 'RuntimeDefault') {
+                addFinding({
+                    id: CIS_MAP.seccomp.id,
+                    title: CIS_MAP.seccomp.title,
+                    message: 'Pod does not use the default seccomp profile',
+                    severity: 'Medium',
+                    resource: pod.metadata?.name || 'Unknown',
+                    kind: pod.kind || 'Unknown',
+                    line: lineInfo.line,
+                    column: lineInfo.column,
+                    snippet: lineInfo.snippet,
+                    remediation: 'Set securityContext.seccompProfile.type to RuntimeDefault'
+                });
+                
+                addAutoFix(pod, {
+                    path: '/spec/securityContext/seccompProfile',
+                    value: { type: 'RuntimeDefault' },
+                    op: 'add'
+                });
+            }
+            
+            // AppArmor profile
+            if (!ctx.appArmorProfile) {
+                addFinding({
+                    id: CIS_MAP.appArmor.id,
+                    title: CIS_MAP.appArmor.title,
+                    message: 'Pod does not specify an AppArmor profile',
+                    severity: 'Low',
+                    resource: pod.metadata?.name || 'Unknown',
+                    kind: pod.kind || 'Unknown',
+                    line: lineInfo.line,
+                    column: lineInfo.column,
+                    snippet: lineInfo.snippet,
+                    remediation: 'Consider using AppArmor to restrict container capabilities'
+                });
+            }
+        }
+
+        function checkHostNamespaces(spec, pod) {
+            const lineInfo = findLineInfo(spec, 'hostNetwork');
+            
+            // Host network
+            if (spec.hostNetwork) {
+                addFinding({
+                    id: CIS_MAP.hostNamespace.id,
+                    title: CIS_MAP.hostNamespace.title,
+                    message: 'Pod shares the host network namespace',
+                    severity: 'High',
+                    resource: pod.metadata?.name || 'Unknown',
+                    kind: pod.kind || 'Unknown',
+                    line: lineInfo.line,
+                    column: lineInfo.column,
+                    snippet: lineInfo.snippet,
+                    remediation: 'Set hostNetwork to false'
+                });
+                
+                addAutoFix(pod, {
+                    path: '/spec/hostNetwork',
+                    value: false,
+                    op: 'replace'
+                });
+            }
+            
+            // Host PID
+            if (spec.hostPID) {
+                addFinding({
+                    id: CIS_MAP.hostNamespace.id,
+                    title: CIS_MAP.hostNamespace.title,
+                    message: 'Pod shares the host PID namespace',
+                    severity: 'High',
+                    resource: pod.metadata?.name || 'Unknown',
+                    kind: pod.kind || 'Unknown',
+                    line: lineInfo.line,
+                    column: lineInfo.column,
+                    snippet: lineInfo.snippet,
+                    remediation: 'Set hostPID to false'
+                });
+                
+                addAutoFix(pod, {
+                    path: '/spec/hostPID',
+                    value: false,
+                    op: 'replace'
+                });
+            }
+            
+            // Host IPC
+            if (spec.hostIPC) {
+                addFinding({
+                    id: CIS_MAP.hostNamespace.id,
+                    title: CIS_MAP.hostNamespace.title,
+                    message: 'Pod shares the host IPC namespace',
+                    severity: 'High',
+                    resource: pod.metadata?.name || 'Unknown',
+                    kind: pod.kind || 'Unknown',
+                    line: lineInfo.line,
+                    column: lineInfo.column,
+                    snippet: lineInfo.snippet,
+                    remediation: 'Set hostIPC to false'
+                });
+                
+                addAutoFix(pod, {
+                    path: '/spec/hostIPC',
+                    value: false,
+                    op: 'replace'
+                });
+            }
+        }
+
+        function checkServiceAccount(spec, pod) {
+            const lineInfo = findLineInfo(spec, 'serviceAccountName');
+            
+            // Default service account
+            if (spec.serviceAccountName === 'default' || !spec.serviceAccountName) {
+                addFinding({
+                    id: CIS_MAP.defaultServiceAccount.id,
+                    title: CIS_MAP.defaultServiceAccount.title,
+                    message: 'Pod uses the default service account',
+                    severity: 'Medium',
+                    resource: pod.metadata?.name || 'Unknown',
+                    kind: pod.kind || 'Unknown',
+                    line: lineInfo.line,
+                    column: lineInfo.column,
+                    snippet: lineInfo.snippet,
+                    remediation: 'Create a dedicated service account for the pod'
+                });
+            }
+            
+            // Automount service account token
+            if (spec.automountServiceAccountToken !== false) {
+                addFinding({
+                    id: CIS_MAP.defaultServiceAccount.id,
+                    title: CIS_MAP.defaultServiceAccount.title,
+                    message: 'Pod automatically mounts the service account token',
+                    severity: 'Medium',
+                    resource: pod.metadata?.name || 'Unknown',
+                    kind: pod.kind || 'Unknown',
+                    line: lineInfo.line,
+                    column: lineInfo.column,
+                    snippet: lineInfo.snippet,
+                    remediation: 'Set automountServiceAccountToken to false if not needed'
+                });
+                
+                addAutoFix(pod, {
+                    path: '/spec/automountServiceAccountToken',
+                    value: false,
+                    op: 'replace'
+                });
+            }
+        }
+
+        function checkVolumes(volumes, pod) {
+            volumes.forEach(vol => {
+                const lineInfo = findLineInfo(vol, 'name', vol.name);
+                
+                // HostPath volumes
+                if (vol.hostPath) {
+                    addFinding({
+                        id: CIS_MAP.hostPathVolume.id,
+                        title: CIS_MAP.hostPathVolume.title,
+                        message: `Pod uses hostPath volume '${vol.name}' mounted at '${vol.hostPath.path}'`,
+                        severity: 'High',
+                        resource: pod.metadata?.name || 'Unknown',
+                        kind: pod.kind || 'Unknown',
+                        line: lineInfo.line,
+                        column: lineInfo.column,
+                        snippet: lineInfo.snippet,
+                        remediation: 'Avoid using hostPath volumes or restrict them to specific paths'
+                    });
+                }
+                
+                // Secret volumes
+                if (vol.secret) {
+                    addFinding({
+                        id: CIS_MAP.secretsVolume.id,
+                        title: CIS_MAP.secretsVolume.title,
+                        message: `Pod mounts secret '${vol.secret.secretName}' as volume '${vol.name}'`,
+                        severity: 'Low',
+                        resource: pod.metadata?.name || 'Unknown',
+                        kind: pod.kind || 'Unknown',
+                        line: lineInfo.line,
+                        column: lineInfo.column,
+                        snippet: lineInfo.snippet,
+                        remediation: 'Ensure secret volumes have appropriate file permissions'
+                    });
+                }
+            });
+        }
+
+        function checkNetworkPolicy(policy) {
+            const lineInfo = findLineInfo(policy, 'kind', 'NetworkPolicy');
+            
+            // Missing ingress rules
+            if (!policy.spec.ingress) {
+                addFinding({
+                    id: CIS_MAP.networkPolicy.id,
+                    title: CIS_MAP.networkPolicy.title,
+                    message: 'NetworkPolicy has no ingress rules defined',
+                    severity: 'High',
+                    resource: policy.metadata?.name || 'Unknown',
+                    kind: policy.kind || 'Unknown',
+                    line: lineInfo.line,
+                    column: lineInfo.column,
+                    snippet: lineInfo.snippet,
+                    remediation: 'Define specific ingress rules to restrict incoming traffic'
+                });
+            }
+            
+            // Missing egress rules
+            if (!policy.spec.egress) {
+                addFinding({
+                    id: CIS_MAP.networkPolicy.id,
+                    title: CIS_MAP.networkPolicy.title,
+                    message: 'NetworkPolicy has no egress rules defined',
+                    severity: 'Medium',
+                    resource: policy.metadata?.name || 'Unknown',
+                    kind: policy.kind || 'Unknown',
+                    line: lineInfo.line,
+                    column: lineInfo.column,
+                    snippet: lineInfo.snippet,
+                    remediation: 'Define specific egress rules to restrict outgoing traffic'
+                });
+            }
+            
+            // Allow-all policies
+            if (policy.spec.ingress && policy.spec.ingress.length === 1 && 
+                (!policy.spec.ingress[0].from || policy.spec.ingress[0].from.length === 0)) {
+                addFinding({
+                    id: CIS_MAP.networkPolicy.id,
+                    title: CIS_MAP.networkPolicy.title,
+                    message: 'NetworkPolicy allows all ingress traffic',
+                    severity: 'High',
+                    resource: policy.metadata?.name || 'Unknown',
+                    kind: policy.kind || 'Unknown',
+                    line: lineInfo.line,
+                    column: lineInfo.column,
+                    snippet: lineInfo.snippet,
+                    remediation: 'Restrict ingress traffic to specific sources'
+                });
+            }
+            
+            if (policy.spec.egress && policy.spec.egress.length === 1 && 
+                (!policy.spec.egress[0].to || policy.spec.egress[0].to.length === 0)) {
+                addFinding({
+                    id: CIS_MAP.networkPolicy.id,
+                    title: CIS_MAP.networkPolicy.title,
+                    message: 'NetworkPolicy allows all egress traffic',
+                    severity: 'Medium',
+                    resource: policy.metadata?.name || 'Unknown',
+                    kind: policy.kind || 'Unknown',
+                    line: lineInfo.line,
+                    column: lineInfo.column,
+                    snippet: lineInfo.snippet,
+                    remediation: 'Restrict egress traffic to specific destinations'
+                });
+            }
+        }
+
+        function scanSecrets(doc) {
+            const docString = JSON.stringify(doc);
+            const lineInfo = findLineInfo(doc, 'kind', doc.kind);
+            
+            SECRET_PATTERNS.forEach(p => {
+                const matches = docString.match(p.regex);
+                if (matches) {
+                    matches.forEach(match => {
+                        addFinding({
+                            id: 'Secret-Detection',
+                            title: 'Secret Detection',
+                            message: `${p.desc}: ${match.substring(0, 20)}... (truncated)`,
+                            severity: 'Critical',
+                            resource: doc.metadata?.name || 'Unknown',
+                            kind: doc.kind || 'Unknown',
+                            line: lineInfo.line,
+                            column: lineInfo.column,
+                            snippet: lineInfo.snippet,
+                            remediation: 'Remove sensitive information from configuration and use Kubernetes Secrets'
+                        });
+                    });
+                }
+            });
+        }
+
+        function checkServiceSecurity(svc) {
+            const lineInfo = findLineInfo(svc, 'kind', 'Service');
+            
+            // External IPs
+            if (svc.spec.externalIPs && svc.spec.externalIPs.length > 0) {
+                addFinding({
+                    id: 'Service-ExternalIPs',
+                    title: 'Service with External IPs',
+                    message: `Service exposes external IPs: ${svc.spec.externalIPs.join(', ')}`,
+                    severity: 'High',
+                    resource: svc.metadata?.name || 'Unknown',
+                    kind: svc.kind || 'Unknown',
+                    line: lineInfo.line,
+                    column: lineInfo.column,
+                    snippet: lineInfo.snippet,
+                    remediation: 'Avoid using externalIPs unless absolutely necessary'
+                });
+            }
+            
+            // LoadBalancer with external traffic
+            if (svc.spec.type === 'LoadBalancer' && svc.spec.externalTrafficPolicy !== 'Local') {
+                addFinding({
+                    id: 'Service-LoadBalancer',
+                    title: 'LoadBalancer Service',
+                    message: 'LoadBalancer service does not preserve client IPs (externalTrafficPolicy should be Local)',
+                    severity: 'Medium',
+                    resource: svc.metadata?.name || 'Unknown',
+                    kind: svc.kind || 'Unknown',
+                    line: lineInfo.line,
+                    column: lineInfo.column,
+                    snippet: lineInfo.snippet,
+                    remediation: 'Set spec.externalTrafficPolicy to Local'
+                });
+            }
+        }
+
+        function checkIngressSecurity(ingress) {
+            const lineInfo = findLineInfo(ingress, 'kind', 'Ingress');
+            
+            // TLS configuration
+            if (!ingress.spec.tls || ingress.spec.tls.length === 0) {
+                addFinding({
+                    id: 'Ingress-TLS',
+                    title: 'Ingress without TLS',
+                    message: 'Ingress does not enforce TLS encryption',
+                    severity: 'High',
+                    resource: ingress.metadata?.name || 'Unknown',
+                    kind: ingress.kind || 'Unknown',
+                    line: lineInfo.line,
+                    column: lineInfo.column,
+                    snippet: lineInfo.snippet,
+                    remediation: 'Configure TLS for the Ingress resource'
+                });
+            }
+            
+            // Default backend
+            if (ingress.spec.defaultBackend) {
+                addFinding({
+                    id: 'Ingress-DefaultBackend',
+                    title: 'Ingress with Default Backend',
+                    message: 'Ingress has a default backend that may expose unintended services',
+                    severity: 'Medium',
+                    resource: ingress.metadata?.name || 'Unknown',
+                    kind: ingress.kind || 'Unknown',
+                    line: lineInfo.line,
+                    column: lineInfo.column,
+                    snippet: lineInfo.snippet,
+                    remediation: 'Avoid using default backends or ensure they are properly secured'
+                });
+            }
+            
+            // Path type
+            if (ingress.spec.rules) {
+                ingress.spec.rules.forEach(rule => {
+                    if (rule.http && rule.http.paths) {
+                        rule.http.paths.forEach(path => {
+                            if (!path.pathType || path.pathType === 'ImplementationSpecific') {
+                                addFinding({
+                                    id: 'Ingress-PathType',
+                                    title: 'Ingress Path Type',
+                                    message: `Ingress path '${path.path}' has unspecified or ImplementationSpecific path type`,
+                                    severity: 'Low',
+                                    resource: ingress.metadata?.name || 'Unknown',
+                                    kind: ingress.kind || 'Unknown',
+                                    line: lineInfo.line,
+                                    column: lineInfo.column,
+                                    snippet: lineInfo.snippet,
+                                    remediation: 'Specify either Prefix or Exact path type for predictable routing'
+                                });
+                            }
+                        });
+                    }
+                });
+            }
+        }
+
+        function checkRBACSecurity(role) {
+            const lineInfo = findLineInfo(role, 'kind', role.kind);
+            
+            // Wildcard resources
+            if (role.rules) {
+                role.rules.forEach(rule => {
+                    if (rule.resources && rule.resources.includes('*')) {
+                        addFinding({
+                            id: 'RBAC-Wildcard',
+                            title: 'RBAC Wildcard Resource',
+                            message: `${role.kind} allows access to all resources`,
+                            severity: 'High',
+                            resource: role.metadata?.name || 'Unknown',
+                            kind: role.kind || 'Unknown',
+                            line: lineInfo.line,
+                            column: lineInfo.column,
+                            snippet: lineInfo.snippet,
+                            remediation: 'Restrict resources to specific API groups and resource types'
+                        });
+                    }
+                    
+                    // Wildcard verbs
+                    if (rule.verbs && rule.verbs.includes('*')) {
+                        addFinding({
+                            id: 'RBAC-Wildcard',
+                            title: 'RBAC Wildcard Verb',
+                            message: `${role.kind} allows all verbs on resources`,
+                            severity: 'High',
+                            resource: role.metadata?.name || 'Unknown',
+                            kind: role.kind || 'Unknown',
+                            line: lineInfo.line,
+                            column: lineInfo.column,
+                            snippet: lineInfo.snippet,
+                            remediation: 'Restrict verbs to only those needed (e.g., get, list)'
+                        });
+                    }
+                    
+                    // Wildcard API groups
+                    if (rule.apiGroups && rule.apiGroups.includes('*')) {
+                        addFinding({
+                            id: 'RBAC-Wildcard',
+                            title: 'RBAC Wildcard API Group',
+                            message: `${role.kind} allows access to all API groups`,
+                            severity: 'High',
+                            resource: role.metadata?.name || 'Unknown',
+                            kind: role.kind || 'Unknown',
+                            line: lineInfo.line,
+                            column: lineInfo.column,
+                            snippet: lineInfo.snippet,
+                            remediation: 'Restrict API groups to specific namespaces'
+                        });
+                    }
+                });
+            }
+        }
+
+        function checkSecretSecurity(secret) {
+            const lineInfo = findLineInfo(secret, 'kind', 'Secret');
+            
+            // Opaque secrets with base64 data
+            if (secret.type === 'Opaque' && secret.data) {
+                Object.keys(secret.data).forEach(key => {
+                    try {
+                        atob(secret.data[key]);
+                    } catch (e) {
+                        addFinding({
+                            id: 'Secret-Encoding',
+                            title: 'Secret Encoding',
+                            message: `Secret '${secret.metadata.name}' contains non-base64 encoded data in key '${key}'`,
+                            severity: 'Medium',
+                            resource: secret.metadata?.name || 'Unknown',
+                            kind: secret.kind || 'Unknown',
+                            line: lineInfo.line,
+                            column: lineInfo.column,
+                            snippet: lineInfo.snippet,
+                            remediation: 'Ensure all secret data is properly base64 encoded'
+                        });
+                    }
+                });
+            }
+            
+            // StringData usage
+            if (secret.stringData) {
+                addFinding({
+                    id: 'Secret-StringData',
+                    title: 'Secret StringData',
+                    message: `Secret '${secret.metadata.name}' uses stringData which may expose values in process listings`,
+                    severity: 'Low',
+                    resource: secret.metadata?.name || 'Unknown',
+                    kind: secret.kind || 'Unknown',
+                    line: lineInfo.line,
+                    column: lineInfo.column,
+                    snippet: lineInfo.snippet,
+                    remediation: 'Use data field with base64 encoded values instead of stringData'
+                });
+            }
+        }
+
+        function checkConfigMapSecurity(configMap) {
+            const lineInfo = findLineInfo(configMap, 'kind', 'ConfigMap');
+            
+            // Sensitive data in ConfigMap
+            if (configMap.data) {
+                Object.keys(configMap.data).forEach(key => {
+                    SECRET_PATTERNS.forEach(p => {
+                        if (p.regex.test(configMap.data[key])) {
+                            addFinding({
+                                id: 'ConfigMap-Secret',
+                                title: 'Sensitive Data in ConfigMap',
+                                message: `ConfigMap '${configMap.metadata.name}' may contain sensitive data in key '${key}'`,
+                                severity: 'High',
+                                resource: configMap.metadata?.name || 'Unknown',
+                                kind: configMap.kind || 'Unknown',
+                                line: lineInfo.line,
+                                column: lineInfo.column,
+                                snippet: lineInfo.snippet,
+                                remediation: 'Move sensitive data to Kubernetes Secrets'
+                            });
+                        }
+                    });
+                });
+            }
+        }
+
+        function checkServiceAccountSecurity(sa) {
+            const lineInfo = findLineInfo(sa, 'kind', 'ServiceAccount');
+            
+            // Automount token
+            if (sa.automountServiceAccountToken !== false) {
+                addFinding({
+                    id: 'ServiceAccount-Token',
+                    title: 'Service Account Token',
+                    message: `ServiceAccount '${sa.metadata.name}' automatically mounts API credentials`,
+                    severity: 'Medium',
+                    resource: sa.metadata?.name || 'Unknown',
+                    kind: sa.kind || 'Unknown',
+                    line: lineInfo.line,
+                    column: lineInfo.column,
+                    snippet: lineInfo.snippet,
+                    remediation: 'Set automountServiceAccountToken to false if not needed'
+                });
+            }
+            
+            // Image pull secrets
+            if (sa.imagePullSecrets && sa.imagePullSecrets.length > 0) {
+                addFinding({
+                    id: 'ServiceAccount-ImagePull',
+                    title: 'Service Account Image Pull',
+                    message: `ServiceAccount '${sa.metadata.name}' contains image pull secrets`,
+                    severity: 'Low',
+                    resource: sa.metadata?.name || 'Unknown',
+                    kind: sa.kind || 'Unknown',
+                    line: lineInfo.line,
+                    column: lineInfo.column,
+                    snippet: lineInfo.snippet,
+                    remediation: 'Ensure image pull secrets are properly scoped and secured'
+                });
+            }
+        }
+
+        function checkPodSecurityPolicy(psp) {
+            const lineInfo = findLineInfo(psp, 'kind', 'PodSecurityPolicy');
+            
+            // Privileged access
+            if (psp.spec.privileged) {
+                addFinding({
+                    id: 'PSP-Privileged',
+                    title: 'Privileged Pod Security Policy',
+                    message: `PodSecurityPolicy '${psp.metadata.name}' allows privileged containers`,
+                    severity: 'High',
+                    resource: psp.metadata?.name || 'Unknown',
+                    kind: psp.kind || 'Unknown',
+                    line: lineInfo.line,
+                    column: lineInfo.column,
+                    snippet: lineInfo.snippet,
+                    remediation: 'Set privileged to false in PodSecurityPolicy'
+                });
+            }
+            
+            // Host namespaces
+            if (psp.spec.hostPID || psp.spec.hostIPC || psp.spec.hostNetwork) {
+                addFinding({
+                    id: 'PSP-HostNamespace',
+                    title: 'Host Namespace Access',
+                    message: `PodSecurityPolicy '${psp.metadata.name}' allows host namespace access`,
+                    severity: 'High',
+                    resource: psp.metadata?.name || 'Unknown',
+                    kind: psp.kind || 'Unknown',
+                    line: lineInfo.line,
+                    column: lineInfo.column,
+                    snippet: lineInfo.snippet,
+                    remediation: 'Restrict host namespace access in PodSecurityPolicy'
+                });
+            }
+            
+            // Volume types
+            if (psp.spec.volumes && psp.spec.volumes.includes('*')) {
+                addFinding({
+                    id: 'PSP-Volumes',
+                    title: 'All Volume Types',
+                    message: `PodSecurityPolicy '${psp.metadata.name}' allows all volume types`,
+                    severity: 'Medium',
+                    resource: psp.metadata?.name || 'Unknown',
+                    kind: psp.kind || 'Unknown',
+                    line: lineInfo.line,
+                    column: lineInfo.column,
+                    snippet: lineInfo.snippet,
+                    remediation: 'Restrict allowed volume types in PodSecurityPolicy'
+                });
+            }
+        }
+
+        function checkGenericResourceSecurity(resource) {
+            // Generic checks for any Kubernetes resource
+            const lineInfo = findLineInfo(resource, 'kind', resource.kind);
+            
+            // Missing namespace
+            if (resource.metadata && !resource.metadata.namespace && resource.kind !== 'Namespace' && 
+                resource.kind !== 'ClusterRole' && resource.kind !== 'ClusterRoleBinding') {
+                addFinding({
+                    id: 'Generic-Namespace',
+                    title: 'Missing Namespace',
+                    message: `${resource.kind} '${resource.metadata.name}' is not assigned to a namespace`,
+                    severity: 'Low',
+                    resource: resource.metadata?.name || 'Unknown',
+                    kind: resource.kind || 'Unknown',
+                    line: lineInfo.line,
+                    column: lineInfo.column,
+                    snippet: lineInfo.snippet,
+                    remediation: 'Specify a namespace for the resource'
+                });
+            }
+            
+            // Missing labels
+            if (resource.metadata && (!resource.metadata.labels || Object.keys(resource.metadata.labels).length === 0)) {
+                addFinding({
+                    id: 'Generic-Labels',
+                    title: 'Missing Labels',
+                    message: `${resource.kind} '${resource.metadata.name}' has no labels`,
+                    severity: 'Low',
+                    resource: resource.metadata?.name || 'Unknown',
+                    kind: resource.kind || 'Unknown',
+                    line: lineInfo.line,
+                    column: lineInfo.column,
+                    snippet: lineInfo.snippet,
+                    remediation: 'Add meaningful labels to the resource'
+                });
+            }
+        }
+
+        function checkGenericYamlSecurity(doc) {
+            // Checks for non-Kubernetes YAML/JSON
+            const lineInfo = findLineInfo(doc, 'kind', 'Generic');
+            
+            // Check for plaintext secrets
+            scanSecrets(doc);
+            
+            // Check for insecure configurations
+            if (typeof doc === 'object') {
+                Object.keys(doc).forEach(key => {
+                    if (typeof doc[key] === 'string') {
+                        if (key.toLowerCase().includes('password') || 
+                            key.toLowerCase().includes('secret') || 
+                            key.toLowerCase().includes('token')) {
+                            addFinding({
+                                id: 'Generic-SecretKey',
+                                title: 'Potential Secret Key',
+                                message: `Key '${key}' may contain sensitive data`,
+                                severity: 'Medium',
+                                resource: 'Generic',
+                                kind: 'YAML/JSON',
+                                line: lineInfo.line,
+                                column: lineInfo.column,
+                                snippet: lineInfo.snippet,
+                                remediation: 'Avoid storing secrets in plaintext configuration'
+                            });
+                        }
+                    }
+                });
+            }
+        }
+
+        function addFinding(finding) {
+            findings.push({
+                id: finding.id,
+                title: finding.title,
+                message: finding.message,
+                severity: finding.severity,
+                resource: finding.resource,
+                kind: finding.kind,
+                line: finding.line,
+                column: finding.column,
+                snippet: finding.snippet,
+                remediation: finding.remediation
+            });
+        }
+
+        function addAutoFix(resource, patch) {
+            // Find existing auto-fix for this resource
+            let fix = autoFixes.find(f => 
+                f.resource.metadata?.name === resource.metadata?.name && 
+                f.resource.kind === resource.kind
+            );
+            
+            if (!fix) {
+                fix = {
+                    resource: JSON.parse(JSON.stringify(resource)),
+                    patches: []
+                };
+                autoFixes.push(fix);
+            }
+            
+            fix.patches.push(patch);
+        }
+
+        function findLineInfo(obj, key, value) {
+            // Simple line finder - in a real implementation, you'd want a more sophisticated approach
+            const jsonString = JSON.stringify(obj);
+            const searchString = `"${key}":${JSON.stringify(value)}`;
+            const index = originalConfig.indexOf(searchString);
+            
+            if (index === -1) {
+                return { line: 'N/A', column: 'N/A', snippet: 'N/A' };
+            }
+            
+            const linesBefore = originalConfig.substring(0, index).split('\n');
+            const line = linesBefore.length;
+            const column = linesBefore[linesBefore.length - 1].length + 1;
+            
+            // Get snippet of surrounding lines
+            const startLine = Math.max(0, line - 2);
+            const endLine = Math.min(configLines.length, line + 2);
+            const snippet = configLines.slice(startLine, endLine).join('\n');
+            
+            return { line, column, snippet };
+        }
+
+        function renderResults() {
+            const resultsDiv = document.getElementById('results');
+            const summaryDiv = document.getElementById('summary');
+            
+            if (findings.length === 0) {
+                resultsDiv.innerHTML = '<div class="finding">No security issues found!</div>';
+                summaryDiv.innerHTML = '<div class="summary-card"><div class="summary-item"><div class="summary-count">0</div><div class="summary-label">Findings</div></div></div>';
+                return;
+            }
+            
+            // Count findings by severity
+            const severityCounts = {
+                Critical: 0,
+                High: 0,
+                Medium: 0,
+                Low: 0,
+                Info: 0
+            };
+            
+            findings.forEach(f => severityCounts[f.severity]++);
+            
+            // Render summary
+            summaryDiv.innerHTML = `
+                <div class="summary-card">
+                    <div class="summary-item Critical">
+                        <div class="summary-count">${severityCounts.Critical}</div>
+                        <div class="summary-label">Critical</div>
+                    </div>
+                    <div class="summary-item High">
+                        <div class="summary-count">${severityCounts.High}</div>
+                        <div class="summary-label">High</div>
+                    </div>
+                    <div class="summary-item Medium">
+                        <div class="summary-count">${severityCounts.Medium}</div>
+                        <div class="summary-label">Medium</div>
+                    </div>
+                    <div class="summary-item Low">
+                        <div class="summary-count">${severityCounts.Low}</div>
+                        <div class="summary-label">Low</div>
+                    </div>
+                    <div class="summary-item Info">
+                        <div class="summary-count">${severityCounts.Info}</div>
+                        <div class="summary-label">Info</div>
+                    </div>
+                </div>
+            `;
+            
+            // Render table
+            let tableHTML = `
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Severity</th>
+                            <th>ID</th>
+                            <th>Title</th>
+                            <th>Resource</th>
+                            <th>Kind</th>
+                            <th>Location</th>
+                            <th>Message</th>
+                            <th>Remediation</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+            
+            findings.forEach(finding => {
+                const location = finding.line !== 'N/A' ? `Line ${finding.line}` : 'N/A';
+                
+                tableHTML += `
+                    <tr class="${finding.severity}">
+                        <td>${finding.severity}</td>
+                        <td>${finding.id}</td>
+                        <td>${finding.title}</td>
+                        <td>${finding.resource}</td>
+                        <td>${finding.kind}</td>
+                        <td>${location}</td>
+                        <td>${finding.message}</td>
+                        <td>${finding.remediation}</td>
+                    </tr>
+                `;
+                
+                if (finding.snippet !== 'N/A') {
+                    tableHTML += `
+                        <tr class="snippet">
+                            <td colspan="8">
+                                <pre>${finding.snippet}</pre>
+                            </td>
+                        </tr>
+                    `;
+                }
+            });
+            
+            tableHTML += `
+                    </tbody>
+                </table>
+            `;
+            
+            resultsDiv.innerHTML = tableHTML;
+        }
+
+        function renderAutoFixes() {
+            const fixesDiv = document.getElementById('autoFixes');
+            
+            if (autoFixes.length === 0) {
+                fixesDiv.innerHTML = '<div>No automatic fixes available</div>';
+                return;
+            }
+            
+            let fixesHTML = '<h3>Suggested Fixes</h3>';
+            
+            autoFixes.forEach(fix => {
+                fixesHTML += `<h4>${fix.resource.kind}: ${fix.resource.metadata?.name || 'Unknown'}</h4>`;
+                fixesHTML += '<ul>';
+                
+                fix.patches.forEach(patch => {
+                    fixesHTML += `<li><code>${patch.op} ${patch.path}: ${JSON.stringify(patch.value)}</code></li>`;
+                });
+                
+                fixesHTML += '</ul>';
+            });
+            
+            fixesDiv.innerHTML = fixesHTML;
+        }
+
+        function downloadCSV() {
+            if (findings.length === 0) {
+                alert('No findings to export');
+                return;
+            }
+            
+            const csvData = findings.map(f => ({
+                Severity: f.severity,
+                ID: f.id,
+                Title: f.title,
+                Resource: f.resource,
+                Kind: f.kind,
+                Location: f.line !== 'N/A' ? `Line ${f.line}` : 'N/A',
+                Message: f.message,
+                Remediation: f.remediation
+            }));
+            
+            const csv = Papa.unparse(csvData);
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = 'k8s_security_findings.csv';
+            link.click();
+            URL.revokeObjectURL(url);
+        }
+
+        function downloadExcel() {
+            if (findings.length === 0) {
+                alert('No findings to export');
+                return;
+            }
+            
+            const excelData = findings.map(f => [
+                f.severity,
+                f.id,
+                f.title,
+                f.resource,
+                f.kind,
+                f.line !== 'N/A' ? `Line ${f.line}` : 'N/A',
+                f.message,
+                f.remediation
+            ]);
+            
+            const wb = XLSX.utils.book_new();
+            const ws = XLSX.utils.aoa_to_sheet([
+                ['Severity', 'ID', 'Title', 'Resource', 'Kind', 'Location', 'Message', 'Remediation'],
+                ...excelData
+            ]);
+            
+            XLSX.utils.book_append_sheet(wb, ws, 'Security Findings');
+            XLSX.writeFile(wb, 'k8s_security_findings.xlsx');
+        }
+
+        function downloadAutoFixes() {
+            if (autoFixes.length === 0) {
+                alert('No automatic fixes available');
+                return;
+            }
+            
+            // Apply patches to resources
+            const fixedResources = autoFixes.map(fix => {
+                const resource = JSON.parse(JSON.stringify(fix.resource));
+                
+                fix.patches.forEach(patch => {
+                    const pathParts = patch.path.split('/').filter(p => p);
+                    let current = resource;
+                    
+                    for (let i = 0; i < pathParts.length - 1; i++) {
+                        const part = pathParts[i];
+                        
+                        if (part.startsWith('[') && part.endsWith(']')) {
+                            // Array selector like [name=container]
+                            const selector = part.substring(1, part.length - 1);
+                            const [key, value] = selector.split('=');
+                            current = current.find(item => item[key] === value);
+                        } else {
+                            current = current[part];
+                        }
+                    }
+                    
+                    const lastPart = pathParts[pathParts.length - 1];
+                    switch (patch.op) {
+                        case 'add':
+                        case 'replace':
+                            current[lastPart] = patch.value;
+                            break;
+                        case 'remove':
+                            delete current[lastPart];
+                            break;
+                    }
+                });
+                
+                return resource;
+            });
+            
+            // Convert to YAML
+            const fixedYaml = fixedResources.map(r => jsyaml.dump(r)).join('---\n');
+            
+            // Download
+            const blob = new Blob([fixedYaml], { type: 'text/yaml' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = 'k8s_security_fixes.yaml';
+            link.click();
+            URL.revokeObjectURL(url);
+        }
+    </script>
+</body>
+</html>
