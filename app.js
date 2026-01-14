@@ -4,105 +4,80 @@
 
 // Security Benchmarks and Patterns
 const CIS_BENCHMARKS = {
-    // Container Security
     privileged: { id: 'CIS 5.2.1', title: 'Privileged Container', severity: 'High' },
     allowPrivilegeEscalation: { id: 'CIS 5.2.6', title: 'Allow Privilege Escalation', severity: 'High' },
     runAsRoot: { id: 'CIS 5.2.5', title: 'Run as Root User', severity: 'High' },
     readOnlyRootFS: { id: 'CIS 5.2.7', title: 'Read-only Root Filesystem', severity: 'Medium' },
     capabilities: { id: 'CIS 5.2.8/5.2.9', title: 'Dangerous Capabilities', severity: 'High' },
-    seLinuxOptions: { id: 'CIS 5.2.10', title: 'SELinux Context Options', severity: 'Medium' },
-    procMount: { id: 'CIS 5.2.11', title: '/proc Mount Type', severity: 'Medium' },
-    
-    // Resource Management
     resourceLimits: { id: 'CIS 5.1.1', title: 'Resource Limits', severity: 'Medium' },
-    resourceLimitsCPU: { id: 'CIS 5.1.2', title: 'CPU Limits', severity: 'Medium' },
-    resourceLimitsMemory: { id: 'CIS 5.1.3', title: 'Memory Limits', severity: 'Medium' },
-    
-    // Image Management
     imageLatestTag: { id: 'CIS 5.4.1', title: 'Latest Image Tag', severity: 'Medium' },
-    imageDigest: { id: 'CIS 5.4.2', title: 'Image Digest', severity: 'Low' },
-    
-    // Pod Security
     hostNamespace: { id: 'CIS 5.2.2/5.2.3/5.2.4', title: 'Host Namespace Sharing', severity: 'High' },
     defaultServiceAccount: { id: 'CIS 5.1.5', title: 'Default Service Account', severity: 'Medium' },
     hostPathVolume: { id: 'CIS 5.3.6', title: 'HostPath Volume', severity: 'High' },
     missingProbes: { id: 'CIS 5.7.4', title: 'Missing Health Probes', severity: 'Medium' },
-    
-    // Network Security
     networkPolicy: { id: 'CIS 6.3.1', title: 'Network Policy', severity: 'High' },
-    hostPort: { id: 'CIS 5.3.5', title: 'Host Port Usage', severity: 'Medium' },
-    
-    // Secrets Management
-    secretsEnv: { id: 'CIS 5.5.1', title: 'Secrets in Environment Variables', severity: 'Medium' },
-    secretsVolume: { id: 'CIS 5.5.2', title: 'Secrets Mounted as Volumes', severity: 'Low' },
-    
-    // General Security
+    secretsEnv: { id: 'CIS 5.5.1', title: 'Secrets in Environment', severity: 'Medium' },
     appArmor: { id: 'CIS 5.2.12', title: 'AppArmor Profile', severity: 'Medium' },
-    seccomp: { id: 'CIS 5.2.13', title: 'Seccomp Profile', severity: 'Medium' },
-    podSecurityPolicy: { id: 'CIS 5.2.14', title: 'Pod Security Policy', severity: 'High' }
+    seccomp: { id: 'CIS 5.2.13', title: 'Seccomp Profile', severity: 'Medium' }
 };
 
 const DANGEROUS_CAPABILITIES = [
     'ALL', 'NET_ADMIN', 'NET_RAW', 'SYS_ADMIN', 'SYS_MODULE', 
     'SYS_PTRACE', 'SYS_RAWIO', 'SYS_CHROOT', 'DAC_OVERRIDE',
     'FOWNER', 'SETUID', 'SETGID', 'KILL', 'MKNOD', 'SYS_BOOT',
-    'SYS_TIME', 'WAKE_ALARM', 'BLOCK_SUSPEND', 'AUDIT_CONTROL',
-    'MAC_ADMIN', 'MAC_OVERRIDE', 'IPC_LOCK', 'LEASE'
+    'SYS_TIME', 'WAKE_ALARM', 'BLOCK_SUSPEND', 'AUDIT_CONTROL'
 ];
 
 const SECRET_PATTERNS = [
     { regex: /AKIA[0-9A-Z]{16}/, desc: 'AWS Access Key ID', severity: 'Critical' },
-    { regex: /[0-9a-zA-Z/+]{40}/, desc: 'AWS Secret Access Key', severity: 'Critical' },
+    { regex: /(?:aws_secret_access_key|aws_session_token)\s*[:=]\s*['"]?[A-Za-z0-9/+=]{40,}['"]?/, desc: 'AWS Secret Key', severity: 'Critical' },
     { regex: /-----BEGIN (RSA|EC|DSA|OPENSSH|PGP) PRIVATE KEY-----/, desc: 'Private Key', severity: 'Critical' },
-    { regex: /-----BEGIN CERTIFICATE-----/, desc: 'Certificate', severity: 'High' },
-    { regex: /eyJ[a-zA-Z0-9_-]*\.eyJ[a-zA-Z0-9_-]*\.[a-zA-Z0-9_-]*/, desc: 'JWT Token', severity: 'Critical' },
     { regex: /ghp_[0-9a-zA-Z]{36}/, desc: 'GitHub Personal Access Token', severity: 'Critical' },
     { regex: /gho_[0-9a-zA-Z]{36}/, desc: 'GitHub OAuth Token', severity: 'Critical' },
+    { regex: /eyJ[a-zA-Z0-9_-]*\.eyJ[a-zA-Z0-9_-]*\.[a-zA-Z0-9_-]*/, desc: 'JWT Token', severity: 'Critical' },
     { regex: /sk-[a-zA-Z0-9]{48}/, desc: 'OpenAI API Key', severity: 'Critical' },
     { regex: /AIza[0-9A-Za-z_-]{35}/, desc: 'Google API Key', severity: 'Critical' },
-    { regex: /xox[pboa]-[0-9]{12}-[0-9]{12}-[0-9]{12}-[a-z0-9]{32}/, desc: 'Slack Token', severity: 'Critical' },
-    { regex: /(?:password|passwd|pwd|secret|token|api[_-]?key)\s*[:=]\s*['"]?[^\s'"`;]{8,}/, desc: 'Hardcoded Credential', severity: 'High' },
-    { regex: /(?:database|db)[^a-zA-Z0-9].*(?:password|pwd|user|url)/i, desc: 'Database credential', severity: 'High' },
-    { regex: /(?:http|https):\/\/[^\s]+@[^\s]+/, desc: 'URL with credentials', severity: 'Critical' }
+    { regex: /(?:password|passwd|pwd|secret|token|api[_-]?key)\s*[:=]\s*['"]?[^\s'"`;]{8,}/, desc: 'Hardcoded Credential', severity: 'High' }
 ];
-
-// NIST SP 800-190 Compliance Checks
-const NIST_COMPLIANCE = {
-    'IM-1': 'Use trusted base images',
-    'IM-2': 'Scan images for vulnerabilities',
-    'IM-3': 'Sign and verify images',
-    'IM-4': 'Use immutable image references',
-    'CM-1': 'Use least privilege',
-    'CM-2': 'Limit container capabilities',
-    'CM-3': 'Prevent privileged containers',
-    'CM-4': 'Prevent root user',
-    'CM-5': 'Use read-only root filesystem',
-    'CM-6': 'Use namespaces',
-    'CM-7': 'Limit host access',
-    'CM-8': 'Limit network access',
-    'PS-1': 'Use resource limits',
-    'PS-2': 'Monitor container resources',
-    'PS-3': 'Limit container lifetime',
-    'PS-4': 'Use health checks',
-    'NS-1': 'Isolate container networks',
-    'NS-2': 'Limit network traffic',
-    'NS-3': 'Encrypt network traffic',
-    'NS-4': 'Authenticate network connections'
-};
 
 // Global state
 let findings = [];
 let currentFilter = 'all';
 let originalConfig = '';
 let configLines = [];
-let autoFixes = [];
+
+// ============================================
+// INITIALIZATION - Run when page loads
+// ============================================
+
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('Security Scanner initialized');
+    
+    // Set up event listeners
+    document.getElementById('scan-btn').addEventListener('click', scanConfiguration);
+    document.getElementById('load-sample-btn').addEventListener('click', loadSample);
+    document.getElementById('clear-btn').addEventListener('click', clearInput);
+    document.getElementById('export-pdf-btn').addEventListener('click', exportPDF);
+    document.getElementById('export-excel-btn').addEventListener('click', exportExcel);
+    document.getElementById('export-json-btn').addEventListener('click', exportJSON);
+    document.getElementById('download-fixes-btn').addEventListener('click', downloadFixes);
+    
+    // Initialize the first tab as active
+    switchTab(null, 'input');
+});
 
 // ============================================
 // UI FUNCTIONS
 // ============================================
 
 // Tab switching
-function switchTab(tab) {
+function switchTab(event, tab) {
+    if (event) {
+        event.preventDefault();
+    }
+    
+    console.log(`Switching to tab: ${tab}`);
+    
     // Remove active class from all tab buttons
     const tabButtons = document.querySelectorAll('.tab-btn');
     tabButtons.forEach(btn => {
@@ -115,251 +90,194 @@ function switchTab(tab) {
         content.classList.remove('active');
     });
     
-    // Add active class to clicked tab button
-    const clickedTab = event.target;
-    clickedTab.classList.add('active');
+    // Add active class to clicked tab button (if event exists)
+    if (event && event.target) {
+        event.target.classList.add('active');
+    } else {
+        // Find and activate the correct tab button
+        tabButtons.forEach(btn => {
+            if (btn.textContent.includes(tab.charAt(0).toUpperCase() + tab.slice(1))) {
+                btn.classList.add('active');
+            }
+        });
+    }
     
     // Show the selected tab content
-    document.getElementById(`${tab}-tab`).classList.add('active');
-    
-    console.log(`Switched to tab: ${tab}`);
+    const tabElement = document.getElementById(`${tab}-tab`);
+    if (tabElement) {
+        tabElement.classList.add('active');
+    }
 }
 
 // Load sample configuration
 function loadSample() {
+    console.log('Loading sample configuration...');
+    
     const sample = `apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: vulnerable-app
   namespace: default
-  labels:
-    app: vulnerable
-    env: production
 spec:
   replicas: 3
   selector:
     matchLabels:
       app: vulnerable
-  strategy:
-    type: RollingUpdate
-    rollingUpdate:
-      maxSurge: 1
-      maxUnavailable: 0
   template:
     metadata:
       labels:
         app: vulnerable
-        version: v1.0.0
     spec:
-      securityContext:
-        runAsNonRoot: false
-        seccompProfile:
-          type: Unconfined
       hostNetwork: true
       hostPID: true
-      hostIPC: true
-      serviceAccountName: default
-      automountServiceAccountToken: true
       containers:
       - name: app
         image: nginx:latest
-        imagePullPolicy: Always
         securityContext:
           privileged: true
           allowPrivilegeEscalation: true
           runAsUser: 0
-          runAsGroup: 0
-          readOnlyRootFilesystem: false
           capabilities:
             add:
               - SYS_ADMIN
               - NET_ADMIN
-              - SYS_PTRACE
-              - DAC_OVERRIDE
-            drop:
-              - NET_BIND_SERVICE
         ports:
         - containerPort: 80
-          hostPort: 8080
-          protocol: TCP
-        - containerPort: 443
-        resources:
-          requests:
-            memory: "64Mi"
-            cpu: "250m"
         env:
         - name: DB_PASSWORD
-          value: "SuperSecretDBPassword123!"
-        - name: AWS_ACCESS_KEY_ID
-          value: "AKIAIOSFODNN7EXAMPLE"
-        - name: JWT_TOKEN
-          value: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
+          value: "supersecretpassword123"
         - name: API_KEY
-          valueFrom:
-            secretKeyRef:
-              name: api-secrets
-              key: api-key
+          value: "AKIAIOSFODNN7EXAMPLE"
         volumeMounts:
         - name: host-root
           mountPath: /host
-          readOnly: false
-        - name: secrets
-          mountPath: /etc/secrets
-        livenessProbe:
-          httpGet:
-            path: /health
-            port: 80
-          initialDelaySeconds: 30
-          periodSeconds: 10
-        readinessProbe:
-          httpGet:
-            path: /ready
-            port: 80
-          initialDelaySeconds: 5
-          periodSeconds: 5
-      initContainers:
-      - name: init-db
-        image: busybox:latest
-        command: ['sh', '-c', 'echo "Initializing database..."']
-        securityContext:
-          runAsUser: 0
       volumes:
       - name: host-root
         hostPath:
           path: /
           type: Directory
-      - name: secrets
-        secret:
-          secretName: app-secrets
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: vulnerable-service
-  namespace: default
 spec:
   type: LoadBalancer
-  externalIPs:
-    - 203.0.113.10
-    - 198.51.100.20
   ports:
-  - name: http
-    port: 80
+  - port: 80
     targetPort: 80
-    protocol: TCP
-  - name: https
-    port: 443
-    targetPort: 443
-    protocol: TCP
   selector:
-    app: vulnerable
----
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: allow-all
-  namespace: default
-spec:
-  podSelector: {}
-  policyTypes:
-  - Ingress
-  - Egress
-  ingress:
-  - {}
-  egress:
-  - {}
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: api-secrets
-  namespace: default
-type: Opaque
-data:
-  api-key: YXBpLWtleS1zZWNyZXQtdmFsdWU=
-  password: c3VwZXItc2VjcmV0LXBhc3N3b3Jk
-stringData:
-  token: "plaintext-token-value"
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: app-config
-  namespace: default
-data:
-  config.json: |
-    {
-      "database": {
-        "host": "localhost",
-        "port": 5432,
-        "username": "admin",
-        "password": "db-admin-password-123",
-        "ssl": true
-      },
-      "api": {
-        "endpoint": "https://api.example.com",
-        "key": "abcdef1234567890"
-      }
-    }
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: super-admin
-rules:
-- apiGroups: ["*"]
-  resources: ["*"]
-  verbs: ["*"]
----
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: vulnerable-ingress
-  namespace: default
-spec:
-  rules:
-  - host: "*.example.com"
-    http:
-      paths:
-      - path: /
-        pathType: Prefix
-        backend:
-          service:
-            name: vulnerable-service
-            port:
-              number: 80
-  tls: []`;
+    app: vulnerable`;
     
     document.getElementById('config-input').value = sample;
-    console.log('Sample configuration loaded');
+    showNotification('Sample configuration loaded successfully!', 'success');
 }
 
 // Clear input
 function clearInput() {
+    console.log('Clearing input...');
     document.getElementById('config-input').value = '';
-    console.log('Input cleared');
+    showNotification('Input cleared', 'info');
 }
+
+// Show notification
+function showNotification(message, type = 'info') {
+    // Remove existing notifications
+    const existingNotifications = document.querySelectorAll('.notification');
+    existingNotifications.forEach(notification => {
+        notification.remove();
+    });
+    
+    // Create notification element
+    const notification = document.createElement('div');
+    notification.className = `notification notification-${type}`;
+    notification.textContent = message;
+    notification.style.cssText = `
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        padding: 15px 20px;
+        border-radius: 8px;
+        color: white;
+        font-weight: 600;
+        z-index: 1000;
+        animation: slideIn 0.3s ease;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    `;
+    
+    // Set background color based on type
+    if (type === 'success') {
+        notification.style.backgroundColor = '#28a745';
+    } else if (type === 'error') {
+        notification.style.backgroundColor = '#dc3545';
+    } else {
+        notification.style.backgroundColor = '#17a2b8';
+    }
+    
+    document.body.appendChild(notification);
+    
+    // Remove notification after 3 seconds
+    setTimeout(() => {
+        notification.style.animation = 'slideOut 0.3s ease';
+        setTimeout(() => {
+            if (notification.parentNode) {
+                notification.parentNode.removeChild(notification);
+            }
+        }, 300);
+    }, 3000);
+}
+
+// Add CSS for animations
+const style = document.createElement('style');
+style.textContent = `
+    @keyframes slideIn {
+        from {
+            transform: translateX(100%);
+            opacity: 0;
+        }
+        to {
+            transform: translateX(0);
+            opacity: 1;
+        }
+    }
+    
+    @keyframes slideOut {
+        from {
+            transform: translateX(0);
+            opacity: 1;
+        }
+        to {
+            transform: translateX(100%);
+            opacity: 0;
+        }
+    }
+`;
+document.head.appendChild(style);
 
 // ============================================
 // MAIN SCANNING FUNCTION
 // ============================================
 
 function scanConfiguration() {
-    console.log('Starting advanced security scan...');
+    console.log('Starting security scan...');
     
     const input = document.getElementById('config-input').value.trim();
     
     if (!input) {
-        alert('Please enter some configuration to scan');
-        console.warn('No input provided');
+        showNotification('Please enter some configuration to scan', 'error');
         return;
     }
+
+    // Show loading state
+    const scanButton = document.getElementById('scan-btn');
+    const originalText = scanButton.innerHTML;
+    scanButton.innerHTML = '<span class="loading-spinner"></span> Scanning...';
+    scanButton.disabled = true;
 
     // Reset state
     findings = [];
     originalConfig = input;
     configLines = input.split('\n');
-    autoFixes = [];
 
     try {
         const inputType = document.getElementById('input-type').value;
@@ -381,14 +299,11 @@ function scanConfiguration() {
             
             console.log(`Scanning document ${index + 1}: ${doc.kind || 'Unknown'}`);
             
-            // Comprehensive security scanning
+            // Scan the document
             scanDocument(doc);
-            scanSecrets(doc);
-            checkNISTCompliance(doc);
-            checkDockerComposeSecurity(doc);
             
-            // Advanced security checks
-            checkAdvancedSecurity(doc);
+            // Scan for secrets
+            scanSecrets(doc);
         });
 
         console.log(`Scan complete. Found ${findings.length} security issues`);
@@ -398,461 +313,795 @@ function scanConfiguration() {
         renderFixes();
         
         // Switch to results tab
-        switchTab('results');
+        switchTab(null, 'results');
+        
+        showNotification(`Scan complete! Found ${findings.length} security issues.`, 'success');
         
     } catch (error) {
         console.error('Scan error:', error);
-        alert(`Error parsing configuration: ${error.message}\n\nPlease check your YAML/JSON syntax.`);
+        showNotification(`Error: ${error.message}`, 'error');
+    } finally {
+        // Reset button state
+        scanButton.innerHTML = originalText;
+        scanButton.disabled = false;
     }
 }
 
 // ============================================
-// ADVANCED SECURITY CHECKS
+// SECURITY CHECK FUNCTIONS
 // ============================================
 
 function scanDocument(doc) {
-    if (!doc.kind && !doc.version) {
-        console.warn('Document has no kind/version field');
-        checkGenericSecurity(doc);
+    if (!doc.kind) {
+        console.warn('Document has no kind field');
         return;
     }
 
-    if (doc.kind) {
-        switch(doc.kind.toLowerCase()) {
-            case 'pod':
-                checkPodSecurity(doc);
-                break;
-            case 'deployment':
-            case 'statefulset':
-            case 'daemonset':
-            case 'replicaset':
-            case 'job':
-            case 'cronjob':
-                checkWorkloadSecurity(doc);
-                break;
-            case 'service':
-                checkServiceSecurity(doc);
-                break;
-            case 'ingress':
-                checkIngressSecurity(doc);
-                break;
-            case 'networkpolicy':
-                checkNetworkPolicy(doc);
-                break;
-            case 'role':
-            case 'clusterrole':
-            case 'rolebinding':
-            case 'clusterrolebinding':
-                checkRBAC(doc);
-                break;
-            case 'secret':
-                checkSecretSecurity(doc);
-                break;
-            case 'configmap':
-                checkConfigMapSecurity(doc);
-                break;
-            case 'serviceaccount':
-                checkServiceAccountSecurity(doc);
-                break;
-            case 'podsecuritypolicy':
-                checkPodSecurityPolicy(doc);
-                break;
-            case 'persistentvolume':
-            case 'persistentvolumeclaim':
-                checkStorageSecurity(doc);
-                break;
-            case 'horizontalpodautoscaler':
-                checkHPASecurity(doc);
-                break;
-            default:
-                checkGenericResourceSecurity(doc);
-        }
+    switch(doc.kind.toLowerCase()) {
+        case 'pod':
+            checkPodSecurity(doc);
+            break;
+        case 'deployment':
+        case 'statefulset':
+        case 'daemonset':
+        case 'replicaset':
+            checkWorkloadSecurity(doc);
+            break;
+        case 'service':
+            checkServiceSecurity(doc);
+            break;
+        case 'ingress':
+            checkIngressSecurity(doc);
+            break;
+        case 'networkpolicy':
+            checkNetworkPolicy(doc);
+            break;
+        case 'role':
+        case 'clusterrole':
+            checkRBAC(doc);
+            break;
+        case 'secret':
+            checkSecret(doc);
+            break;
+        case 'configmap':
+            checkConfigMap(doc);
+            break;
     }
 }
-
-// Advanced security checks
-function checkAdvancedSecurity(doc) {
-    // Check for deprecated APIs
-    checkDeprecatedAPIs(doc);
-    
-    // Check for beta/alpha features
-    checkBetaFeatures(doc);
-    
-    // Check for pod security standards
-    checkPodSecurityStandards(doc);
-    
-    // Check for container runtime security
-    checkContainerRuntimeSecurity(doc);
-    
-    // Check for cloud provider specific security
-    checkCloudProviderSecurity(doc);
-}
-
-// NIST Compliance checks
-function checkNISTCompliance(doc) {
-    const lineInfo = findLineInfo(doc, 'kind', doc.kind);
-    
-    // IM-1: Use trusted base images
-    if (doc.spec?.template?.spec?.containers) {
-        doc.spec.template.spec.containers.forEach(container => {
-            if (container.image && container.image.includes('nginx:latest')) {
-                addFinding('NIST-IM-1', 'Using untrusted base image with latest tag', 
-                          doc.metadata?.name || 'Unknown', doc.kind || 'Unknown', 
-                          'Medium', lineInfo, 'Use specific, trusted image tags from verified registries');
-            }
-        });
-    }
-    
-    // CM-1: Use least privilege
-    if (doc.spec?.template?.spec?.containers) {
-        doc.spec.template.spec.containers.forEach(container => {
-            if (container.securityContext?.privileged) {
-                addFinding('NIST-CM-1', 'Container violates least privilege principle', 
-                          doc.metadata?.name || 'Unknown', doc.kind || 'Unknown', 
-                          'High', lineInfo, 'Remove privileged mode and use minimal required capabilities');
-            }
-        });
-    }
-}
-
-// Docker Compose security checks
-function checkDockerComposeSecurity(doc) {
-    if (doc.version && doc.services) {
-        const lineInfo = findLineInfo(doc, 'version');
-        
-        Object.keys(doc.services).forEach(serviceName => {
-            const service = doc.services[serviceName];
-            
-            // Check for privileged mode in Docker Compose
-            if (service.privileged) {
-                addFinding('Docker-Privileged', `Docker service '${serviceName}' runs in privileged mode`, 
-                          serviceName, 'Docker Service', 'High', lineInfo,
-                          'Remove privileged: true from Docker Compose configuration');
-            }
-            
-            // Check for host network mode
-            if (service.network_mode === 'host') {
-                addFinding('Docker-HostNetwork', `Docker service '${serviceName}' uses host network`, 
-                          serviceName, 'Docker Service', 'High', lineInfo,
-                          'Use bridge network instead of host network');
-            }
-            
-            // Check for volume mounts
-            if (service.volumes) {
-                service.volumes.forEach(volume => {
-                    if (typeof volume === 'string' && volume.includes('/:')) {
-                        addFinding('Docker-HostMount', `Docker service '${serviceName}' mounts host directory`, 
-                                  serviceName, 'Docker Service', 'High', lineInfo,
-                                  'Avoid mounting host directories, use named volumes');
-                    }
-                });
-            }
-        });
-    }
-}
-
-// ============================================
-// COMPREHENSIVE SECURITY CHECK FUNCTIONS
-// ============================================
 
 function checkPodSecurity(pod) {
     const spec = pod.spec || {};
     const resourceName = pod.metadata?.name || 'Unknown';
-    const podLineInfo = findLineInfo(pod, 'kind', 'Pod');
 
     console.log(`Checking pod security for: ${resourceName}`);
 
-    // Advanced host namespace checks
+    // Host namespaces
     if (spec.hostNetwork) {
-        addFinding('hostNamespace', `Pod shares host network namespace`, resourceName, pod.kind, 'High', podLineInfo);
-        addAutoFix(pod, 'spec.hostNetwork', false);
+        addFinding('hostNamespace', `Pod shares host network namespace`, resourceName, pod.kind);
     }
     if (spec.hostPID) {
-        addFinding('hostNamespace', `Pod shares host PID namespace`, resourceName, pod.kind, 'High', podLineInfo);
-        addAutoFix(pod, 'spec.hostPID', false);
+        addFinding('hostNamespace', `Pod shares host PID namespace`, resourceName, pod.kind);
     }
     if (spec.hostIPC) {
-        addFinding('hostNamespace', `Pod shares host IPC namespace`, resourceName, pod.kind, 'High', podLineInfo);
-        addAutoFix(pod, 'spec.hostIPC', false);
+        addFinding('hostNamespace', `Pod shares host IPC namespace`, resourceName, pod.kind);
     }
 
-    // Service account with auto-fix
+    // Service account
     if (!spec.serviceAccountName || spec.serviceAccountName === 'default') {
-        addFinding('defaultServiceAccount', `Pod uses default service account`, resourceName, pod.kind, 'Medium', podLineInfo);
-        addAutoFix(pod, 'spec.serviceAccountName', `${resourceName}-sa`);
+        addFinding('defaultServiceAccount', `Pod uses default service account`, resourceName, pod.kind);
     }
 
-    // Automount service account token
-    if (spec.automountServiceAccountToken !== false) {
-        addFinding('defaultServiceAccount', `Pod automatically mounts service account token`, resourceName, pod.kind, 'Medium', podLineInfo);
-        addAutoFix(pod, 'spec.automountServiceAccountToken', false);
-    }
-
-    // Check all containers (including init containers)
+    // Containers
     const containers = [...(spec.containers || []), ...(spec.initContainers || [])];
-    containers.forEach((container, index) => {
-        const isInit = index >= (spec.containers?.length || 0);
-        const containerLineInfo = findLineInfo(isInit ? spec.initContainers : spec.containers, index, container.name);
-        checkContainerSecurity(container, resourceName, pod.kind, containerLineInfo, isInit);
-    });
+    containers.forEach(container => checkContainerSecurity(container, resourceName, pod.kind));
 
-    // Advanced volume checks
+    // Volumes
     if (spec.volumes) {
-        spec.volumes.forEach((vol, index) => {
-            const volLineInfo = findLineInfo(spec.volumes, index, vol.name);
-            checkVolumeSecurity(vol, resourceName, pod.kind, volLineInfo);
+        spec.volumes.forEach(vol => {
+            if (vol.hostPath) {
+                addFinding('hostPathVolume', `Pod uses hostPath volume: ${vol.name}`, resourceName, pod.kind);
+            }
         });
     }
 
-    // Pod security context with auto-fixes
+    // Security context
     if (spec.securityContext) {
-        const secCtxLineInfo = findLineInfo(spec, 'securityContext');
-        if (spec.securityContext.runAsNonRoot !== true) {
-            addFinding('runAsRoot', `Pod does not enforce runAsNonRoot`, resourceName, pod.kind, 'High', secCtxLineInfo);
-            addAutoFix(pod, 'spec.securityContext.runAsNonRoot', true);
+        if (!spec.securityContext.runAsNonRoot) {
+            addFinding('runAsRoot', `Pod does not enforce runAsNonRoot`, resourceName, pod.kind);
         }
         if (!spec.securityContext.seccompProfile || spec.securityContext.seccompProfile.type !== 'RuntimeDefault') {
-            addFinding('seccomp', `Pod missing default seccomp profile`, resourceName, pod.kind, 'Medium', secCtxLineInfo);
-            addAutoFix(pod, 'spec.securityContext.seccompProfile', { type: 'RuntimeDefault' });
+            addFinding('seccomp', `Pod missing seccomp profile`, resourceName, pod.kind);
         }
-        if (spec.securityContext.runAsUser === 0) {
-            addFinding('pod-runAsRoot', `Pod security context runs as root`, resourceName, pod.kind, 'High', secCtxLineInfo);
-            addAutoFix(pod, 'spec.securityContext.runAsUser', 1000);
-        }
-    } else {
-        const specLineInfo = findLineInfo(pod, 'spec');
-        addFinding('security-context', `Pod missing security context`, resourceName, pod.kind, 'Medium', specLineInfo);
-        addAutoFix(pod, 'spec.securityContext', {
-            runAsNonRoot: true,
-            runAsUser: 1000,
-            runAsGroup: 3000,
-            seccompProfile: { type: 'RuntimeDefault' }
-        });
-    }
-
-    // Node selector/affinity/tolerations security
-    checkNodeSecurity(spec, resourceName, pod.kind, podLineInfo);
-    
-    // Priority class checks
-    if (spec.priorityClassName) {
-        addFinding('priority-class', `Pod uses priority class: ${spec.priorityClassName}`, resourceName, pod.kind, 'Info', podLineInfo);
-    }
-
-    // Topology spread constraints
-    if (spec.topologySpreadConstraints) {
-        addFinding('topology-spread', `Pod uses topology spread constraints`, resourceName, pod.kind, 'Info', podLineInfo);
     }
 }
 
-function checkContainerSecurity(container, resourceName, kind, lineInfo, isInitContainer = false) {
+function checkWorkloadSecurity(workload) {
+    const template = workload.spec?.template;
+    if (template) {
+        checkPodSecurity({
+            kind: 'Pod',
+            metadata: { name: workload.metadata?.name },
+            spec: template.spec
+        });
+    }
+}
+
+function checkContainerSecurity(container, resourceName, kind) {
     const ctx = container.securityContext || {};
     const name = container.name;
-    const containerType = isInitContainer ? 'Init Container' : 'Container';
 
-    console.log(`Checking ${containerType.toLowerCase()}: ${name}`);
+    console.log(`Checking container: ${name}`);
 
-    // Advanced privileged check
+    // Privileged
     if (ctx.privileged) {
-        addFinding('privileged', `${containerType} '${name}' runs in privileged mode`, resourceName, kind, 'High', lineInfo);
-        addAutoFixForContainer(resourceName, kind, container, 'securityContext.privileged', false);
+        addFinding('privileged', `Container '${name}' runs in privileged mode`, resourceName, kind);
     }
 
-    // Privilege escalation with auto-fix
+    // Privilege escalation
     if (ctx.allowPrivilegeEscalation !== false) {
-        const severity = ctx.allowPrivilegeEscalation ? 'High' : 'Medium';
-        addFinding('allowPrivilegeEscalation', `${containerType} '${name}' allows privilege escalation`, 
-                  resourceName, kind, severity, lineInfo);
-        addAutoFixForContainer(resourceName, kind, container, 'securityContext.allowPrivilegeEscalation', false);
+        addFinding('allowPrivilegeEscalation', `Container '${name}' allows privilege escalation`, resourceName, kind);
     }
 
-    // Root user check with auto-fix
-    if (ctx.runAsUser === 0 || ctx.runAsUser === '0') {
-        addFinding('runAsRoot', `${containerType} '${name}' runs as root user (UID 0)`, 
-                  resourceName, kind, 'High', lineInfo);
-        addAutoFixForContainer(resourceName, kind, container, 'securityContext.runAsUser', 1000);
+    // Root user
+    if (ctx.runAsUser === 0) {
+        addFinding('runAsRoot', `Container '${name}' runs as root (UID 0)`, resourceName, kind);
     }
 
     // Read-only root filesystem
-    if (ctx.readOnlyRootFilesystem !== true) {
-        addFinding('readOnlyRootFS', `${containerType} '${name}' does not have read-only root filesystem`, 
-                  resourceName, kind, 'Medium', lineInfo);
-        addAutoFixForContainer(resourceName, kind, container, 'securityContext.readOnlyRootFilesystem', true);
+    if (!ctx.readOnlyRootFilesystem) {
+        addFinding('readOnlyRootFS', `Container '${name}' has writable root filesystem`, resourceName, kind);
     }
 
-    // Advanced capabilities management
+    // Capabilities
     if (ctx.capabilities?.add) {
         const dangerous = ctx.capabilities.add.filter(cap => 
             DANGEROUS_CAPABILITIES.includes(cap.toUpperCase())
         );
         if (dangerous.length > 0) {
-            addFinding('capabilities', `${containerType} '${name}' has dangerous capabilities: ${dangerous.join(', ')}`, 
-                      resourceName, kind, 'High', lineInfo);
-            addAutoFixForContainer(resourceName, kind, container, 'securityContext.capabilities.add', 
-                ctx.capabilities.add.filter(cap => !DANGEROUS_CAPABILITIES.includes(cap.toUpperCase()))
-            );
+            addFinding('capabilities', `Container '${name}' has dangerous capabilities: ${dangerous.join(', ')}`, resourceName, kind);
         }
     }
-    
-    // Ensure ALL capabilities are dropped
-    if (!ctx.capabilities?.drop?.includes('ALL')) {
-        addFinding('capabilities', `${containerType} '${name}' does not drop all capabilities`, 
-                  resourceName, kind, 'Medium', lineInfo);
-        const newDrop = ctx.capabilities?.drop || [];
-        if (!newDrop.includes('ALL')) newDrop.push('ALL');
-        addAutoFixForContainer(resourceName, kind, container, 'securityContext.capabilities.drop', newDrop);
-    }
 
-    // Advanced resource management
+    // Resource limits
     if (!container.resources?.limits) {
-        addFinding('resourceLimits', `${containerType} '${name}' has no resource limits`, 
-                  resourceName, kind, 'Medium', lineInfo);
-        addAutoFixForContainer(resourceName, kind, container, 'resources.limits', {
-            cpu: '500m',
-            memory: '512Mi'
-        });
-    } else {
-        if (!container.resources.limits.cpu) {
-            addFinding('resourceLimitsCPU', `${containerType} '${name}' has no CPU limit`, 
-                      resourceName, kind, 'Medium', lineInfo);
-            addAutoFixForContainer(resourceName, kind, container, 'resources.limits.cpu', '500m');
-        }
-        if (!container.resources.limits.memory) {
-            addFinding('resourceLimitsMemory', `${containerType} '${name}' has no memory limit`, 
-                      resourceName, kind, 'Medium', lineInfo);
-            addAutoFixForContainer(resourceName, kind, container, 'resources.limits.memory', '512Mi');
-        }
-    }
-    
-    if (!container.resources?.requests) {
-        addFinding('resource-requests', `${containerType} '${name}' has no resource requests`, 
-                  resourceName, kind, 'Low', lineInfo);
-        addAutoFixForContainer(resourceName, kind, container, 'resources.requests', {
-            cpu: '100m',
-            memory: '128Mi'
-        });
+        addFinding('resourceLimits', `Container '${name}' has no resource limits`, resourceName, kind);
     }
 
-    // Health probes with auto-fixes
-    if (!container.livenessProbe) {
-        addFinding('missingProbes', `${containerType} '${name}' missing liveness probe`, 
-                  resourceName, kind, 'Medium', lineInfo);
-        addAutoFixForContainer(resourceName, kind, container, 'livenessProbe', {
-            httpGet: { path: '/healthz', port: 8080 },
-            initialDelaySeconds: 15,
-            periodSeconds: 10,
-            timeoutSeconds: 5,
-            successThreshold: 1,
-            failureThreshold: 3
-        });
-    }
-    if (!container.readinessProbe) {
-        addFinding('missingProbes', `${containerType} '${name}' missing readiness probe`, 
-                  resourceName, kind, 'Medium', lineInfo);
-        addAutoFixForContainer(resourceName, kind, container, 'readinessProbe', {
-            httpGet: { path: '/ready', port: 8080 },
-            initialDelaySeconds: 5,
-            periodSeconds: 5,
-            timeoutSeconds: 3,
-            successThreshold: 1,
-            failureThreshold: 3
-        });
+    // Health probes
+    if (!container.livenessProbe || !container.readinessProbe) {
+        addFinding('missingProbes', `Container '${name}' missing health probes`, resourceName, kind);
     }
 
-    // Image security
-    if (container.image) {
-        if (container.image.endsWith(':latest') || !container.image.includes(':')) {
-            addFinding('imageLatestTag', `${containerType} '${name}' uses 'latest' or no tag`, 
-                      resourceName, kind, 'Medium', lineInfo);
-        }
-        if (!container.image.includes('@sha256:')) {
-            addFinding('imageDigest', `${containerType} '${name}' not using immutable image digest`, 
-                      resourceName, kind, 'Low', lineInfo);
-        }
-        if (container.imagePullPolicy === 'Always') {
-            addFinding('image-pull-policy', `${containerType} '${name}' uses Always pull policy`, 
-                      resourceName, kind, 'Low', lineInfo);
-        }
+    // Image tag
+    if (container.image && (container.image.endsWith(':latest') || !container.image.includes(':'))) {
+        addFinding('imageLatestTag', `Container '${name}' uses 'latest' or no tag`, resourceName, kind);
     }
 
-    // Advanced environment variable checks
+    // Environment variables
     if (container.env) {
-        container.env.forEach((envVar, index) => {
-            const envLineInfo = findLineInfo(container.env, index, envVar.name);
+        container.env.forEach(envVar => {
             if (envVar.valueFrom?.secretKeyRef) {
-                addFinding('secretsEnv', `${containerType} '${name}' uses secret in env var '${envVar.name}'`, 
-                          resourceName, kind, 'Medium', envLineInfo);
-            }
-            if (envVar.value && SECRET_PATTERNS.some(p => p.regex.test(envVar.value))) {
-                addFinding('hardcoded-env', `${containerType} '${name}' has hardcoded secret in env var '${envVar.name}'`, 
-                          resourceName, kind, 'Critical', envLineInfo);
-            }
-        });
-    }
-
-    // Ports and networking
-    if (container.ports) {
-        container.ports.forEach((port, index) => {
-            const portLineInfo = findLineInfo(container.ports, index, port.containerPort);
-            if (port.hostPort) {
-                addFinding('hostPort', `${containerType} '${name}' uses hostPort: ${port.hostPort}`, 
-                          resourceName, kind, 'Medium', portLineInfo);
-            }
-            if (!port.protocol) {
-                addFinding('port-protocol', `${containerType} '${name}' port ${port.containerPort} missing protocol`, 
-                          resourceName, kind, 'Low', portLineInfo);
-            }
-        });
-    }
-
-    // Command and args security
-    if (container.command && container.command.includes('sh') && container.command.includes('-c')) {
-        addFinding('shell-command', `${containerType} '${name}' uses shell command execution`, 
-                  resourceName, kind, 'Low', lineInfo);
-    }
-
-    // Security context missing
-    if (!container.securityContext) {
-        addFinding('container-security-context', `${containerType} '${name}' missing security context`, 
-                  resourceName, kind, 'Medium', lineInfo);
-        addAutoFixForContainer(resourceName, kind, container, 'securityContext', {
-            runAsUser: 1000,
-            runAsGroup: 3000,
-            allowPrivilegeEscalation: false,
-            readOnlyRootFilesystem: true,
-            capabilities: {
-                drop: ['ALL']
+                addFinding('secretsEnv', `Container '${name}' uses secret in env var '${envVar.name}'`, resourceName, kind);
             }
         });
     }
 }
 
-function checkVolumeSecurity(vol, resourceName, kind, lineInfo) {
-    if (vol.hostPath) {
-        addFinding('hostPathVolume', `Volume '${vol.name}' uses hostPath: ${vol.hostPath.path}`, 
-                  resourceName, kind, 'High', lineInfo);
+function checkServiceSecurity(svc) {
+    const resourceName = svc.metadata?.name || 'Unknown';
+    console.log(`Checking service: ${resourceName}`);
+    
+    if (svc.spec?.type === 'LoadBalancer') {
+        addFinding('Service-LoadBalancer', `Service exposes LoadBalancer publicly`, resourceName, svc.kind, 'Medium');
     }
     
-    if (vol.emptyDir && vol.emptyDir.medium === 'Memory') {
-        addFinding('memory-volume', `Volume '${vol.name}' uses memory-backed emptyDir`, 
-                  resourceName, kind, 'Medium', lineInfo);
-    }
-    
-    if (vol.configMap && vol.configMap.defaultMode !== 0o644) {
-        addFinding('configmap-permissions', `Volume '${vol.name}' configMap has non-standard permissions`, 
-                  resourceName, kind, 'Low', lineInfo);
+    if (svc.spec?.externalIPs?.length > 0) {
+        addFinding('Service-ExternalIP', `Service uses external IPs`, resourceName, svc.kind, 'High');
     }
 }
 
-// [Rest of the functions continue with similar comprehensive coverage...]
+function checkIngressSecurity(ingress) {
+    const resourceName = ingress.metadata?.name || 'Unknown';
+    console.log(`Checking ingress: ${resourceName}`);
+    
+    if (!ingress.spec?.tls || ingress.spec.tls.length === 0) {
+        addFinding('Ingress-NoTLS', `Ingress does not enforce TLS`, resourceName, ingress.kind, 'High');
+    }
+}
 
-// Due to character limits, I'll provide the rest of the functions in the next message
-// This includes: checkWorkloadSecurity, checkNodeSecurity, checkServiceSecurity, 
-// checkIngressSecurity, checkNetworkPolicy, checkRBAC, checkSecretSecurity, 
-// checkConfigMapSecurity, checkServiceAccountSecurity, checkStorageSecurity, 
-// checkHPASecurity, checkDeprecatedAPIs, checkBetaFeatures, checkPodSecurityStandards,
-// checkContainerRuntimeSecurity, checkCloudProviderSecurity, checkGenericSecurity,
-// scanSecrets, findLineInfo, addFinding, addAutoFix, addAutoFixForContainer,
-// getRemediation, renderResults, renderFindingsTable, renderFixes, filterFindings,
-// exportPDF, exportExcel, exportJSON, downloadFixes, and other helper functions
+function checkNetworkPolicy(policy) {
+    const resourceName = policy.metadata?.name || 'Unknown';
+    console.log(`Checking network policy: ${resourceName}`);
+    
+    if (!policy.spec?.ingress) {
+        addFinding('networkPolicy', `NetworkPolicy has no ingress rules`, resourceName, policy.kind);
+    }
+    
+    if (!policy.spec?.egress) {
+        addFinding('networkPolicy', `NetworkPolicy has no egress rules`, resourceName, policy.kind);
+    }
+}
 
-// Let me know if you want me to continue with the complete implementation!
+function checkRBAC(role) {
+    const resourceName = role.metadata?.name || 'Unknown';
+    console.log(`Checking RBAC: ${resourceName}`);
+    
+    if (role.rules) {
+        role.rules.forEach(rule => {
+            if (rule.resources?.includes('*')) {
+                addFinding('RBAC-Wildcard', `${role.kind} allows wildcard resources`, resourceName, role.kind, 'High');
+            }
+            if (rule.verbs?.includes('*')) {
+                addFinding('RBAC-Wildcard', `${role.kind} allows wildcard verbs`, resourceName, role.kind, 'High');
+            }
+        });
+    }
+}
+
+function checkSecret(secret) {
+    const resourceName = secret.metadata?.name || 'Unknown';
+    console.log(`Checking secret: ${resourceName}`);
+    
+    if (secret.data) {
+        Object.keys(secret.data).forEach(key => {
+            try {
+                const decoded = atob(secret.data[key]);
+                SECRET_PATTERNS.forEach(pattern => {
+                    if (pattern.regex.test(decoded)) {
+                        addFinding('Secret-Exposed', `Secret contains ${pattern.desc} in key '${key}'`, resourceName, secret.kind, 'Critical');
+                    }
+                });
+            } catch (e) {
+                // Invalid base64
+            }
+        });
+    }
+}
+
+function checkConfigMap(configMap) {
+    const resourceName = configMap.metadata?.name || 'Unknown';
+    console.log(`Checking configmap: ${resourceName}`);
+    
+    if (configMap.data) {
+        Object.values(configMap.data).forEach(value => {
+            SECRET_PATTERNS.forEach(pattern => {
+                if (pattern.regex.test(value)) {
+                    addFinding('ConfigMap-Secret', `ConfigMap contains ${pattern.desc}`, resourceName, configMap.kind, 'High');
+                }
+            });
+        });
+    }
+}
+
+function scanSecrets(doc) {
+    const docString = JSON.stringify(doc);
+    const resourceName = doc.metadata?.name || 'Unknown';
+    
+    SECRET_PATTERNS.forEach(pattern => {
+        const matches = docString.match(new RegExp(pattern.regex, 'g'));
+        if (matches) {
+            matches.slice(0, 3).forEach(match => {
+                addFinding('Hardcoded-Secret', `${pattern.desc}: ${match.substring(0, 20)}...`, resourceName, doc.kind || 'Unknown', pattern.severity);
+            });
+        }
+    });
+}
+
+// ============================================
+// HELPER FUNCTIONS
+// ============================================
+
+function addFinding(type, message, resource, kind, customSeverity = null) {
+    const benchmark = CIS_BENCHMARKS[type];
+    const id = benchmark?.id || type;
+    const title = benchmark?.title || type;
+    const severity = customSeverity || benchmark?.severity || 'Medium';
+    
+    console.log(`Finding: [${severity}] ${title} - ${message}`);
+    
+    findings.push({
+        id,
+        title,
+        message,
+        severity,
+        resource,
+        kind,
+        remediation: getRemediation(type)
+    });
+}
+
+function getRemediation(type) {
+    const remediations = {
+        privileged: 'Set securityContext.privileged to false',
+        allowPrivilegeEscalation: 'Set securityContext.allowPrivilegeEscalation to false',
+        runAsRoot: 'Set securityContext.runAsUser to non-zero and runAsNonRoot to true',
+        readOnlyRootFS: 'Set securityContext.readOnlyRootFilesystem to true',
+        capabilities: 'Remove dangerous capabilities and drop all with securityContext.capabilities.drop: ["ALL"]',
+        resourceLimits: 'Define resources.limits for CPU and memory',
+        imageLatestTag: 'Use specific immutable image tags',
+        hostNamespace: 'Set hostNetwork, hostPID, and hostIPC to false',
+        defaultServiceAccount: 'Create and use a dedicated ServiceAccount',
+        hostPathVolume: 'Avoid hostPath volumes, use PersistentVolumes instead',
+        missingProbes: 'Add livenessProbe and readinessProbe',
+        networkPolicy: 'Define NetworkPolicy with specific ingress/egress rules',
+        secretsEnv: 'Mount secrets as volumes instead of environment variables',
+        seccomp: 'Set securityContext.seccompProfile.type to RuntimeDefault',
+        appArmor: 'Add AppArmor annotations',
+        'Service-LoadBalancer': 'Consider using ClusterIP or NodePort instead',
+        'Service-ExternalIP': 'Remove externalIPs configuration',
+        'Ingress-NoTLS': 'Configure TLS certificates for HTTPS',
+        'RBAC-Wildcard': 'Specify exact resources and verbs needed',
+        'Secret-Exposed': 'Remove sensitive data from secrets, use external secret management',
+        'ConfigMap-Secret': 'Move sensitive data to Kubernetes Secrets',
+        'Hardcoded-Secret': 'Remove hardcoded secrets, use Kubernetes Secrets or external vaults'
+    };
+    return remediations[type] || 'Review and fix the security issue';
+}
+
+// ============================================
+// RENDERING FUNCTIONS
+// ============================================
+
+function renderResults() {
+    const summarySection = document.getElementById('summary-section');
+    const resultsSection = document.getElementById('results-section');
+    const filterBar = document.getElementById('filter-bar');
+    const exportControls = document.getElementById('export-controls');
+    
+    console.log(`Rendering ${findings.length} findings`);
+    
+    if (findings.length === 0) {
+        summarySection.innerHTML = '';
+        resultsSection.innerHTML = `
+            <div class="no-findings">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                </svg>
+                <h2>No Security Issues Found!</h2>
+                <p>Your configuration appears to be secure.</p>
+            </div>
+        `;
+        filterBar.style.display = 'none';
+        exportControls.style.display = 'none';
+        return;
+    }
+
+    // Count findings by severity
+    const counts = {
+        Critical: 0,
+        High: 0,
+        Medium: 0,
+        Low: 0,
+        Info: 0
+    };
+
+    findings.forEach(f => counts[f.severity]++);
+
+    // Render summary section
+    summarySection.innerHTML = `
+        <div class="summary-grid">
+            <div class="summary-card critical">
+                <div class="summary-count">${counts.Critical}</div>
+                <div class="summary-label">Critical</div>
+            </div>
+            <div class="summary-card high">
+                <div class="summary-count">${counts.High}</div>
+                <div class="summary-label">High</div>
+            </div>
+            <div class="summary-card medium">
+                <div class="summary-count">${counts.Medium}</div>
+                <div class="summary-label">Medium</div>
+            </div>
+            <div class="summary-card low">
+                <div class="summary-count">${counts.Low}</div>
+                <div class="summary-label">Low</div>
+            </div>
+            <div class="summary-card info">
+                <div class="summary-count">${counts.Info}</div>
+                <div class="summary-label">Info</div>
+            </div>
+        </div>
+    `;
+
+    // Render findings table
+    renderFindingsTable();
+    
+    // Show filter bar and export controls
+    filterBar.style.display = 'flex';
+    exportControls.style.display = 'flex';
+}
+
+function renderFindingsTable() {
+    const resultsSection = document.getElementById('results-section');
+    const filtered = currentFilter === 'all' 
+        ? findings 
+        : findings.filter(f => f.severity === currentFilter);
+
+    console.log(`Rendering ${filtered.length} filtered findings (filter: ${currentFilter})`);
+
+    if (filtered.length === 0) {
+        resultsSection.innerHTML = '<div class="no-findings"><p>No findings for selected filter.</p></div>';
+        return;
+    }
+
+    let tableHTML = `
+        <table class="findings-table">
+            <thead>
+                <tr>
+                    <th>Severity</th>
+                    <th>ID</th>
+                    <th>Title</th>
+                    <th>Resource</th>
+                    <th>Kind</th>
+                    <th>Message</th>
+                    <th>Remediation</th>
+                </tr>
+            </thead>
+            <tbody>
+    `;
+
+    filtered.forEach(finding => {
+        tableHTML += `
+            <tr>
+                <td><span class="severity-badge severity-${finding.severity.toLowerCase()}">${finding.severity}</span></td>
+                <td><code>${finding.id}</code></td>
+                <td>${finding.title}</td>
+                <td>${finding.resource}</td>
+                <td>${finding.kind}</td>
+                <td>${finding.message}</td>
+                <td>${finding.remediation}</td>
+            </tr>
+        `;
+    });
+
+    tableHTML += '</tbody></table>';
+    resultsSection.innerHTML = tableHTML;
+}
+
+function renderFixes() {
+    const fixesSection = document.getElementById('fixes-section');
+    const fixControls = document.getElementById('fix-controls');
+    
+    console.log('Rendering fixes');
+    
+    if (findings.length === 0) {
+        fixesSection.innerHTML = '<div class="no-findings"><p>No fixes needed - configuration is secure!</p></div>';
+        fixControls.style.display = 'none';
+        return;
+    }
+
+    let fixHTML = '<div class="stats-bar"><strong>Auto-fix suggestions generated based on findings</strong></div>';
+    
+    // Group findings by resource type and name
+    const groupedFindings = {};
+    findings.forEach(f => {
+        const key = `${f.kind}:${f.resource}`;
+        if (!groupedFindings[key]) {
+            groupedFindings[key] = [];
+        }
+        groupedFindings[key].push(f);
+    });
+
+    Object.keys(groupedFindings).forEach(key => {
+        const [kind, resource] = key.split(':');
+        fixHTML += `
+            <div class="fix-item">
+                <h4>${kind}: ${resource}</h4>
+                <ul>
+        `;
+        
+        groupedFindings[key].forEach(f => {
+            fixHTML += `<li><strong>${f.title}:</strong> ${f.remediation}</li>`;
+        });
+        
+        fixHTML += '</ul></div>';
+    });
+
+    fixesSection.innerHTML = fixHTML;
+    fixControls.style.display = 'flex';
+}
+
+// ============================================
+// FILTER AND EXPORT FUNCTIONS
+// ============================================
+
+function filterFindings(severity) {
+    currentFilter = severity;
+    console.log(`Filtering by: ${severity}`);
+    
+    // Update active filter button
+    document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active'));
+    event.target.classList.add('active');
+    
+    // Re-render the findings table
+    renderFindingsTable();
+}
+
+function exportPDF() {
+    console.log('Generating PDF report...');
+    
+    if (findings.length === 0) {
+        showNotification('No findings to export', 'error');
+        return;
+    }
+    
+    try {
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF('p', 'mm', 'a4');
+        
+        // Get counts
+        const counts = {
+            Critical: 0,
+            High: 0,
+            Medium: 0,
+            Low: 0,
+            Info: 0
+        };
+        findings.forEach(f => counts[f.severity]++);
+        
+        // Title
+        doc.setFontSize(24);
+        doc.setTextColor(102, 126, 234);
+        doc.text('Security Scan Report', 105, 20, { align: 'center' });
+        
+        doc.setFontSize(12);
+        doc.setTextColor(108, 117, 125);
+        doc.text('Kubernetes & Docker Configuration Analysis', 105, 28, { align: 'center' });
+        doc.text(`Generated: ${new Date().toLocaleString()}`, 105, 34, { align: 'center' });
+        
+        // Line separator
+        doc.setDrawColor(102, 126, 234);
+        doc.setLineWidth(0.5);
+        doc.line(20, 40, 190, 40);
+        
+        let yPos = 50;
+        
+        // Executive Summary
+        doc.setFontSize(16);
+        doc.setTextColor(73, 80, 87);
+        doc.text('Executive Summary', 20, yPos);
+        yPos += 10;
+        
+        doc.setFontSize(10);
+        doc.setTextColor(108, 117, 125);
+        doc.text(`Total Findings: ${findings.length}`, 20, yPos);
+        yPos += 6;
+        doc.text(`Critical: ${counts.Critical}  |  High: ${counts.High}  |  Medium: ${counts.Medium}  |  Low: ${counts.Low}  |  Info: ${counts.Info}`, 20, yPos);
+        yPos += 10;
+        
+        // Risk Assessment
+        const riskLevel = counts.Critical > 0 ? 'CRITICAL' : 
+                         counts.High > 0 ? 'HIGH' : 
+                         counts.Medium > 0 ? 'MEDIUM' : 'LOW';
+        
+        doc.setFontSize(11);
+        doc.text(`Overall Risk Level: ${riskLevel}`, 20, yPos);
+        yPos += 10;
+        
+        // Detailed Findings
+        doc.setFontSize(16);
+        doc.setTextColor(73, 80, 87);
+        doc.text('Detailed Findings', 20, yPos);
+        yPos += 8;
+        
+        const severities = ['Critical', 'High', 'Medium', 'Low', 'Info'];
+        
+        severities.forEach(severity => {
+            const severityFindings = findings.filter(f => f.severity === severity);
+            if (severityFindings.length === 0) return;
+            
+            // Check if we need a new page
+            if (yPos > 250) {
+                doc.addPage();
+                yPos = 20;
+            }
+            
+            doc.setFontSize(12);
+            doc.setTextColor(73, 80, 87);
+            doc.text(`${severity} Severity (${severityFindings.length})`, 20, yPos);
+            yPos += 6;
+            
+            doc.setFontSize(9);
+            doc.setTextColor(108, 117, 125);
+            
+            severityFindings.forEach((finding, index) => {
+                if (yPos > 270) {
+                    doc.addPage();
+                    yPos = 20;
+                }
+                
+                const text = `${index + 1}. [${finding.id}] ${finding.title}`;
+                doc.text(text, 25, yPos);
+                yPos += 5;
+                
+                const resourceText = `   Resource: ${finding.resource} (${finding.kind})`;
+                doc.text(resourceText, 25, yPos);
+                yPos += 4;
+                
+                const messageLines = doc.splitTextToSize(`   ${finding.message}`, 160);
+                doc.text(messageLines, 25, yPos);
+                yPos += messageLines.length * 4;
+                
+                const remediationLines = doc.splitTextToSize(`   Fix: ${finding.remediation}`, 160);
+                doc.setTextColor(40, 167, 69);
+                doc.text(remediationLines, 25, yPos);
+                doc.setTextColor(108, 117, 125);
+                yPos += remediationLines.length * 4 + 3;
+            });
+            
+            yPos += 5;
+        });
+        
+        // Add footer with page numbers
+        const pageCount = doc.internal.getNumberOfPages();
+        for (let i = 1; i <= pageCount; i++) {
+            doc.setPage(i);
+            doc.setFontSize(8);
+            doc.setTextColor(150);
+            doc.text(`Page ${i} of ${pageCount}`, 105, 290, { align: 'center' });
+            doc.text('Generated by K8s & Docker Security Scanner', 105, 295, { align: 'center' });
+        }
+        
+        // Save the PDF
+        doc.save('security-scan-report.pdf');
+        showNotification('PDF report generated successfully!', 'success');
+        
+    } catch (error) {
+        console.error('Error generating PDF:', error);
+        showNotification('Error generating PDF report: ' + error.message, 'error');
+    }
+}
+
+function exportExcel() {
+    console.log('Exporting to Excel...');
+    
+    if (findings.length === 0) {
+        showNotification('No findings to export', 'error');
+        return;
+    }
+    
+    try {
+        // Prepare data
+        const data = findings.map(f => ({
+            'Severity': f.severity,
+            'ID': f.id,
+            'Title': f.title,
+            'Resource': f.resource,
+            'Kind': f.kind,
+            'Message': f.message,
+            'Remediation': f.remediation
+        }));
+        
+        // Create worksheet
+        const worksheet = XLSX.utils.json_to_sheet(data);
+        
+        // Create workbook
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, 'Security Findings');
+        
+        // Auto-size columns
+        const maxWidths = {};
+        Object.keys(data[0]).forEach(key => {
+            maxWidths[key] = Math.max(
+                key.length,
+                ...data.map(row => String(row[key]).length)
+            );
+        });
+        
+        worksheet['!cols'] = Object.keys(maxWidths).map(key => ({ wch: Math.min(maxWidths[key], 50) }));
+        
+        // Save file
+        XLSX.writeFile(workbook, 'security-findings.xlsx');
+        showNotification('Excel file exported successfully!', 'success');
+        
+    } catch (error) {
+        console.error('Error exporting to Excel:', error);
+        showNotification('Error exporting to Excel: ' + error.message, 'error');
+    }
+}
+
+function exportJSON() {
+    console.log('Exporting to JSON...');
+    
+    if (findings.length === 0) {
+        showNotification('No findings to export', 'error');
+        return;
+    }
+    
+    try {
+        const report = {
+            metadata: {
+                generatedAt: new Date().toISOString(),
+                totalFindings: findings.length,
+                scannerVersion: '1.0.0'
+            },
+            summary: {
+                Critical: findings.filter(f => f.severity === 'Critical').length,
+                High: findings.filter(f => f.severity === 'High').length,
+                Medium: findings.filter(f => f.severity === 'Medium').length,
+                Low: findings.filter(f => f.severity === 'Low').length,
+                Info: findings.filter(f => f.severity === 'Info').length
+            },
+            findings: findings
+        };
+        
+        const jsonStr = JSON.stringify(report, null, 2);
+        const blob = new Blob([jsonStr], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'security-findings.json';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        
+        showNotification('JSON file exported successfully!', 'success');
+        
+    } catch (error) {
+        console.error('Error exporting to JSON:', error);
+        showNotification('Error exporting to JSON: ' + error.message, 'error');
+    }
+}
+
+function downloadFixes() {
+    console.log('Downloading fixes...');
+    
+    if (findings.length === 0) {
+        showNotification('No fixes to download', 'error');
+        return;
+    }
+    
+    try {
+        // Generate a summary of fixes
+        let fixesContent = `# Security Fixes Summary\n`;
+        fixesContent += `# Generated: ${new Date().toLocaleString()}\n`;
+        fixesContent += `# Total Issues: ${findings.length}\n\n`;
+        
+        // Group findings by resource
+        const groupedFindings = {};
+        findings.forEach(f => {
+            const key = `${f.kind}:${f.resource}`;
+            if (!groupedFindings[key]) {
+                groupedFindings[key] = [];
+            }
+            groupedFindings[key].push(f);
+        });
+        
+        Object.keys(groupedFindings).forEach(key => {
+            const [kind, resource] = key.split(':');
+            fixesContent += `## ${kind}: ${resource}\n`;
+            
+            groupedFindings[key].forEach((f, index) => {
+                fixesContent += `${index + 1}. ${f.title}\n`;
+                fixesContent += `   Issue: ${f.message}\n`;
+                fixesContent += `   Fix: ${f.remediation}\n\n`;
+            });
+        });
+        
+        // Create and download file
+        const blob = new Blob([fixesContent], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'security-fixes.txt';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        
+        showNotification('Fixes downloaded successfully!', 'success');
+        
+    } catch (error) {
+        console.error('Error downloading fixes:', error);
+        showNotification('Error downloading fixes: ' + error.message, 'error');
+    }
+}
+
+// ============================================
+// INITIALIZATION COMPLETE
+// ============================================
+
+console.log('K8s & Docker Security Scanner loaded successfully!');
