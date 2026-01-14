@@ -28,7 +28,7 @@
             box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
             border: 1px solid rgba(255, 255, 255, 0.1);
             width: 100%;
-            max-width: 500px;
+            max-width: 550px;
         }
 
         .title {
@@ -65,7 +65,6 @@
 
         .config-button:hover {
             background: rgba(30, 41, 59, 0.9);
-            border-color: #60a5fa;
             transform: translateY(-2px);
             box-shadow: 0 5px 15px rgba(96, 165, 250, 0.1);
         }
@@ -92,6 +91,20 @@
             font-size: 12px;
             font-weight: 500;
             border: 1px solid rgba(96, 165, 250, 0.3);
+        }
+
+        .scan-button {
+            background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+            border: 2px solid rgba(96, 165, 250, 0.5);
+            color: white;
+            font-weight: 600;
+            margin-top: 10px;
+        }
+
+        .scan-button:hover {
+            background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%);
+            border-color: #60a5fa;
+            box-shadow: 0 5px 20px rgba(37, 99, 235, 0.3);
         }
 
         .yaml-content {
@@ -140,6 +153,12 @@
             background: rgba(239, 68, 68, 0.1);
             color: #f87171;
             border-color: rgba(248, 113, 113, 0.3);
+        }
+
+        .status-message.info {
+            background: rgba(96, 165, 250, 0.1);
+            color: #60a5fa;
+            border-color: rgba(96, 165, 250, 0.3);
         }
 
         @keyframes fadeIn {
@@ -205,6 +224,132 @@
             font-family: 'Courier New', monospace;
         }
 
+        .scan-progress {
+            background: rgba(15, 23, 42, 0.9);
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 20px;
+            display: none;
+            animation: slideDown 0.3s ease;
+        }
+
+        .scan-progress.active {
+            display: block;
+        }
+
+        .progress-title {
+            color: #94a3b8;
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .progress-bar {
+            height: 8px;
+            background: rgba(30, 41, 59, 0.8);
+            border-radius: 4px;
+            margin: 10px 0;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #3b82f6, #60a5fa);
+            border-radius: 4px;
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+
+        .progress-stats {
+            display: flex;
+            justify-content: space-between;
+            color: #94a3b8;
+            font-size: 12px;
+            margin-top: 10px;
+        }
+
+        .scan-results {
+            background: rgba(15, 23, 42, 0.9);
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 20px;
+            display: none;
+            animation: slideDown 0.3s ease;
+        }
+
+        .scan-results.active {
+            display: block;
+        }
+
+        .results-title {
+            color: #94a3b8;
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .results-content {
+            color: #cbd5e1;
+            font-size: 13px;
+            line-height: 1.5;
+            font-family: 'Courier New', monospace;
+            max-height: 200px;
+            overflow-y: auto;
+            padding: 10px;
+            background: rgba(30, 41, 59, 0.5);
+            border-radius: 5px;
+        }
+
+        .results-content::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .results-content::-webkit-scrollbar-track {
+            background: rgba(30, 41, 59, 0.5);
+            border-radius: 3px;
+        }
+
+        .results-content::-webkit-scrollbar-thumb {
+            background: #3b82f6;
+            border-radius: 3px;
+        }
+
+        .yaml-editor {
+            width: 100%;
+            background: transparent;
+            border: 1px solid rgba(96, 165, 250, 0.3);
+            border-radius: 5px;
+            padding: 10px;
+            color: #cbd5e1;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            line-height: 1.4;
+            min-height: 150px;
+            resize: vertical;
+            margin-top: 10px;
+            display: none;
+        }
+
+        .yaml-editor.active {
+            display: block;
+        }
+
+        .action-buttons {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+        }
+
+        .action-buttons button {
+            flex: 1;
+        }
+
         @media (max-width: 600px) {
             .container {
                 padding: 20px;
@@ -213,6 +358,10 @@
             .config-button {
                 padding: 15px;
                 font-size: 14px;
+            }
+            
+            .action-buttons {
+                flex-direction: column;
             }
         }
     </style>
@@ -252,6 +401,9 @@ options:
   timeout: 30
             </div>
 
+            <!-- YAML Editor -->
+            <textarea class="yaml-editor" id="yamlEditor" placeholder="Edit YAML configuration here..."></textarea>
+
             <!-- Load Sample Button -->
             <button class="config-button" id="loadSampleBtn">
                 <div class="button-text">
@@ -268,13 +420,51 @@ options:
                 </div>
             </div>
 
-            <!-- Clear Button -->
-            <button class="config-button" id="clearBtn">
-                <div class="button-text">
-                    <span class="button-icon">🗑️</span>
-                    Clear
+            <!-- Action Buttons -->
+            <div class="action-buttons">
+                <!-- Clear Button -->
+                <button class="config-button" id="clearBtn">
+                    <div class="button-text">
+                        <span class="button-icon">🗑️</span>
+                        Clear
+                    </div>
+                </button>
+
+                <!-- Scan Button -->
+                <button class="config-button scan-button" id="scanBtn">
+                    <div class="button-text">
+                        <span class="button-icon">🚀</span>
+                        Scan YAML
+                    </div>
+                </button>
+            </div>
+
+            <!-- Scan Progress -->
+            <div class="scan-progress" id="scanProgress">
+                <div class="progress-title">
+                    <span>Scan Progress</span>
+                    <span id="progressPercent">0%</span>
                 </div>
-            </button>
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progressFill"></div>
+                </div>
+                <div class="progress-stats">
+                    <span>Status: <span id="scanStatus">Idle</span></span>
+                    <span>Targets: <span id="targetCount">0</span></span>
+                    <span>Ports: <span id="portCount">0</span></span>
+                </div>
+            </div>
+
+            <!-- Scan Results -->
+            <div class="scan-results" id="scanResults">
+                <div class="results-title">
+                    <span>Scan Results</span>
+                    <span id="resultsTimestamp"></span>
+                </div>
+                <div class="results-content" id="resultsContent">
+                    <!-- Scan results will appear here -->
+                </div>
+            </div>
         </div>
 
         <!-- Status Message -->
@@ -285,43 +475,110 @@ options:
         // DOM Elements
         const yamlBtn = document.getElementById('yamlBtn');
         const yamlContent = document.getElementById('yamlContent');
+        const yamlEditor = document.getElementById('yamlEditor');
         const loadSampleBtn = document.getElementById('loadSampleBtn');
         const clearBtn = document.getElementById('clearBtn');
+        const scanBtn = document.getElementById('scanBtn');
         const sampleData = document.getElementById('sampleData');
         const sampleContent = document.getElementById('sampleContent');
+        const scanProgress = document.getElementById('scanProgress');
+        const scanResults = document.getElementById('scanResults');
+        const progressFill = document.getElementById('progressFill');
+        const progressPercent = document.getElementById('progressPercent');
+        const scanStatus = document.getElementById('scanStatus');
+        const targetCount = document.getElementById('targetCount');
+        const portCount = document.getElementById('portCount');
+        const resultsContent = document.getElementById('resultsContent');
+        const resultsTimestamp = document.getElementById('resultsTimestamp');
         const statusMessage = document.getElementById('statusMessage');
 
         // Sample data
         const sampleConfigs = [
             {
                 name: "Basic Network Scan",
-                config: `target: 192.168.1.0/24\nports: 22,80,443,8080\nintensity: normal`
+                config: `scan:
+  target: "192.168.1.0/24"
+  ports: "22,80,443,8080"
+  intensity: "normal"
+  timing: "3"
+  
+output:
+  format: "txt"
+  file: "network_scan.txt"
+  
+options:
+  stealth: false
+  max_retries: 2`
             },
             {
                 name: "Web Application Scan",
-                config: `target: example.com\nports: 80,443,3000\nscripts: http-vuln\noutput: web_scan.json`
+                config: `scan:
+  target: "example.com"
+  ports: "80,443,3000,8080"
+  intensity: "aggressive"
+  scripts: "http-vuln,http-headers"
+  
+output:
+  format: "json"
+  file: "web_scan.json"
+  verbose: true
+  
+options:
+  stealth: true
+  timeout: 60`
             },
             {
                 name: "Comprehensive Security Audit",
-                config: `target: 10.0.0.0/16\nports: 1-65535\nintensity: aggressive\ntiming: paranoid\nscripts: all`
+                config: `scan:
+  target: "10.0.0.0/16"
+  ports: "1-1024"
+  intensity: "insane"
+  timing: "paranoid"
+  scripts: "all"
+  
+output:
+  format: "xml"
+  file: "full_audit.xml"
+  verbose: true
+  
+options:
+  stealth: true
+  max_retries: 5
+  timeout: 120`
             }
         ];
+
+        // Current scan simulation variables
+        let currentScanInterval = null;
+        let isScanning = false;
 
         // YAML Button - Toggle YAML content visibility
         yamlBtn.addEventListener('click', () => {
             const isActive = yamlContent.classList.contains('active');
             yamlContent.classList.toggle('active');
+            yamlEditor.classList.toggle('active');
             const yamlIndicator = yamlBtn.querySelector('.yaml-indicator');
+            
+            // Sync editor with content if editor is empty
+            if (!isActive && yamlEditor.value === '') {
+                yamlEditor.value = yamlContent.textContent;
+            }
             
             if (!isActive) {
                 yamlIndicator.textContent = '▲';
-                showStatus('YAML configuration expanded', 'success');
+                showStatus('YAML configuration expanded. You can edit the YAML below.', 'info');
             } else {
                 yamlIndicator.textContent = '▼';
                 showStatus('YAML configuration collapsed', 'info');
             }
             
             yamlBtn.blur();
+        });
+
+        // YAML Editor change handler
+        yamlEditor.addEventListener('input', () => {
+            // Update the displayed YAML content
+            yamlContent.textContent = yamlEditor.value;
         });
 
         // Load Sample Button
@@ -338,20 +595,25 @@ options:
             // Select a random sample
             const randomSample = sampleConfigs[Math.floor(Math.random() * sampleConfigs.length)];
             
-            // Update sample content
+            // Update YAML content and editor
+            yamlContent.textContent = randomSample.config;
+            yamlEditor.value = randomSample.config;
+            
+            // Update sample display
             sampleContent.textContent = `[${randomSample.name}]\n${randomSample.config}`;
             
             // Show sample data
             sampleData.classList.add('active');
             
+            // Auto-expand YAML editor if collapsed
+            if (!yamlContent.classList.contains('active')) {
+                yamlContent.classList.add('active');
+                yamlEditor.classList.add('active');
+                yamlBtn.querySelector('.yaml-indicator').textContent = '▲';
+            }
+            
             // Show success message
             showStatus(`Loaded sample: ${randomSample.name}`, 'success');
-            
-            // Auto-hide YAML content if open
-            if (yamlContent.classList.contains('active')) {
-                yamlContent.classList.remove('active');
-                yamlBtn.querySelector('.yaml-indicator').textContent = '▼';
-            }
             
             loadSampleBtn.blur();
         });
@@ -369,11 +631,31 @@ options:
                 sampleData.classList.remove('active');
                 sampleContent.textContent = '';
                 
-                // Hide YAML content if open
-                if (yamlContent.classList.contains('active')) {
-                    yamlContent.classList.remove('active');
-                    yamlBtn.querySelector('.yaml-indicator').textContent = '▼';
-                }
+                // Clear scan results
+                scanProgress.classList.remove('active');
+                scanResults.classList.remove('active');
+                
+                // Reset YAML to default
+                const defaultConfig = `# Sample YAML Configuration
+scan:
+  target: "192.168.1.0/24"
+  ports: "1-1000"
+  intensity: "medium"
+  timing: "4"
+  scripts: "vuln"
+  
+output:
+  format: "json"
+  file: "scan_results.json"
+  verbose: true
+  
+options:
+  stealth: true
+  max_retries: 3
+  timeout: 30`;
+                
+                yamlContent.textContent = defaultConfig;
+                yamlEditor.value = defaultConfig;
                 
                 // Show cleared message
                 showStatus('All configurations cleared successfully', 'success');
@@ -382,6 +664,179 @@ options:
             }, 600);
         });
 
+        // Scan Button
+        scanBtn.addEventListener('click', () => {
+            if (isScanning) {
+                stopScan();
+                return;
+            }
+            
+            startScan();
+        });
+
+        function startScan() {
+            if (isScanning) return;
+            
+            isScanning = true;
+            scanBtn.classList.add('loading');
+            scanBtn.innerHTML = `<div class="button-text"><span class="button-icon">⏹️</span>Stop Scan</div>`;
+            
+            // Show progress and hide results
+            scanProgress.classList.add('active');
+            scanResults.classList.remove('active');
+            
+            // Reset progress
+            progressFill.style.width = '0%';
+            progressPercent.textContent = '0%';
+            scanStatus.textContent = 'Initializing...';
+            
+            // Parse YAML to get scan parameters
+            const yamlText = yamlEditor.value || yamlContent.textContent;
+            const lines = yamlText.split('\n');
+            
+            // Extract scan parameters (simplified parsing)
+            let targets = 1;
+            let ports = 100;
+            
+            for (const line of lines) {
+                if (line.includes('target:')) {
+                    if (line.includes('/24')) targets = 254;
+                    else if (line.includes('/16')) targets = 65534;
+                    else if (line.includes('example.com')) targets = 1;
+                }
+                if (line.includes('ports:')) {
+                    const portsMatch = line.match(/"([^"]+)"/);
+                    if (portsMatch) {
+                        const portsStr = portsMatch[1];
+                        if (portsStr.includes('-')) {
+                            const range = portsStr.split('-').map(Number);
+                            ports = range[1] - range[0] + 1;
+                        } else if (portsStr.includes(',')) {
+                            ports = portsStr.split(',').length;
+                        }
+                    }
+                }
+            }
+            
+            targetCount.textContent = targets;
+            portCount.textContent = ports;
+            
+            // Start scan simulation
+            let progress = 0;
+            const scanSteps = [
+                'Parsing YAML configuration...',
+                'Initializing scanner...',
+                'Resolving targets...',
+                'Starting port scan...',
+                'Running vulnerability scripts...',
+                'Analyzing results...',
+                'Generating report...'
+            ];
+            
+            currentScanInterval = setInterval(() => {
+                progress += Math.random() * 3 + 1; // 1-4% per interval
+                if (progress > 100) progress = 100;
+                
+                progressFill.style.width = `${progress}%`;
+                progressPercent.textContent = `${Math.round(progress)}%`;
+                
+                const stepIndex = Math.floor(progress / (100 / scanSteps.length));
+                if (stepIndex < scanSteps.length) {
+                    scanStatus.textContent = scanSteps[stepIndex];
+                }
+                
+                if (progress >= 100) {
+                    completeScan(yamlText);
+                }
+            }, 200);
+        }
+
+        function stopScan() {
+            if (!isScanning) return;
+            
+            clearInterval(currentScanInterval);
+            isScanning = false;
+            scanBtn.classList.remove('loading');
+            scanBtn.innerHTML = `<div class="button-text"><span class="button-icon">🚀</span>Scan YAML</div>`;
+            scanStatus.textContent = 'Stopped by user';
+            showStatus('Scan stopped', 'info');
+        }
+
+        function completeScan(yamlText) {
+            clearInterval(currentScanInterval);
+            isScanning = false;
+            scanBtn.classList.remove('loading');
+            scanBtn.innerHTML = `<div class="button-text"><span class="button-icon">🚀</span>Scan YAML</div>`;
+            scanStatus.textContent = 'Completed';
+            
+            // Generate scan results
+            const now = new Date();
+            resultsTimestamp.textContent = now.toLocaleTimeString();
+            
+            // Parse YAML for results
+            const lines = yamlText.split('\n');
+            let target = 'Unknown';
+            let ports = 'Unknown';
+            let intensity = 'medium';
+            
+            for (const line of lines) {
+                if (line.includes('target:')) {
+                    const match = line.match(/target:\s*"([^"]+)"/);
+                    if (match) target = match[1];
+                }
+                if (line.includes('ports:')) {
+                    const match = line.match(/ports:\s*"([^"]+)"/);
+                    if (match) ports = match[1];
+                }
+                if (line.includes('intensity:')) {
+                    const match = line.match(/intensity:\s*"([^"]+)"/);
+                    if (match) intensity = match[1];
+                }
+            }
+            
+            // Generate mock results based on intensity
+            let openPorts = [];
+            let vulnerabilities = [];
+            
+            if (intensity === 'normal' || intensity === 'medium') {
+                openPorts = ['22 (SSH)', '80 (HTTP)', '443 (HTTPS)'];
+                vulnerabilities = ['Weak SSH configuration detected'];
+            } else if (intensity === 'aggressive') {
+                openPorts = ['22 (SSH)', '80 (HTTP)', '443 (HTTPS)', '21 (FTP)', '25 (SMTP)'];
+                vulnerabilities = ['Weak SSH configuration', 'FTP anonymous login enabled', 'HTTP outdated server version'];
+            } else {
+                openPorts = ['22 (SSH)', '80 (HTTP)', '443 (HTTPS)', '21 (FTP)', '25 (SMTP)', '53 (DNS)', '110 (POP3)'];
+                vulnerabilities = ['Weak SSH configuration', 'FTP anonymous login', 'HTTP outdated server', 'SMTP open relay', 'DNS zone transfer allowed'];
+            }
+            
+            // Format results
+            const results = `=== SCAN RESULTS ===
+Timestamp: ${now.toLocaleString()}
+Target: ${target}
+Ports scanned: ${ports}
+Intensity: ${intensity}
+Duration: ${(Math.random() * 30 + 10).toFixed(2)} seconds
+
+=== OPEN PORTS ===
+${openPorts.map(port => `• ${port}`).join('\n')}
+
+=== VULNERABILITIES ===
+${vulnerabilities.map(vuln => `• ${vuln}`).join('\n')}
+
+=== RECOMMENDATIONS ===
+• Update all services to latest versions
+• Disable unused services
+• Implement firewall rules
+• Regular security audits recommended
+
+Scan completed successfully.`;
+            
+            resultsContent.textContent = results;
+            scanResults.classList.add('active');
+            
+            showStatus('Scan completed successfully! Results displayed below.', 'success');
+        }
+
         // Status message function
         function showStatus(message, type = 'success') {
             statusMessage.textContent = message;
@@ -389,14 +844,16 @@ options:
             
             if (type === 'error') {
                 statusMessage.classList.add('error');
+            } else if (type === 'info') {
+                statusMessage.classList.add('info');
             }
             
             statusMessage.style.display = 'block';
             
-            // Auto-hide status message after 3 seconds
+            // Auto-hide status message after 4 seconds
             setTimeout(() => {
                 statusMessage.style.display = 'none';
-            }, 3000);
+            }, 4000);
         }
 
         // Keyboard shortcuts
@@ -418,16 +875,31 @@ options:
                 e.preventDefault();
                 clearBtn.click();
             }
+            
+            // Ctrl+S for Scan
+            if (e.ctrlKey && e.key === 's') {
+                e.preventDefault();
+                scanBtn.click();
+            }
+            
+            // Escape to stop scan
+            if (e.key === 'Escape' && isScanning) {
+                e.preventDefault();
+                stopScan();
+            }
         });
 
         // Initialization
         document.addEventListener('DOMContentLoaded', () => {
-            showStatus('Scan Configuration Interface Ready', 'success');
+            // Set initial YAML editor content
+            yamlEditor.value = yamlContent.textContent;
             
-            // Auto-hide status after 2 seconds
+            showStatus('Scan Configuration Interface Ready. Use Ctrl+S to start scan.', 'success');
+            
+            // Auto-hide status after 3 seconds
             setTimeout(() => {
                 statusMessage.style.display = 'none';
-            }, 2000);
+            }, 3000);
         });
     </script>
 </body>
