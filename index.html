@@ -3,8 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>K8s Security Scanner</title>
+    <title>K8s & Docker Security Scanner</title>
     <link rel="stylesheet" href="styles.css">
+    <!-- External Libraries -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/js-yaml/4.1.0/js-yaml.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -14,15 +15,15 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>🔒 K8s Security Scanner</h1>
+            <h1>🔒 K8s & Docker Security Scanner</h1>
             <p>Advanced security analysis for Kubernetes and Docker configurations</p>
         </div>
 
         <div class="main-card">
             <div class="tabs">
-                <button class="tab-btn active" onclick="switchTab('input')">📝 Input</button>
-                <button class="tab-btn" onclick="switchTab('results')">📊 Results</button>
-                <button class="tab-btn" onclick="switchTab('fixes')">🔧 Auto-Fixes</button>
+                <button class="tab-btn active" onclick="switchTab(event, 'input')">📝 Input</button>
+                <button class="tab-btn" onclick="switchTab(event, 'results')">📊 Results</button>
+                <button class="tab-btn" onclick="switchTab(event, 'fixes')">🔧 Auto-Fixes</button>
             </div>
 
             <div id="input-tab" class="tab-content active">
@@ -31,13 +32,13 @@
                     <textarea id="config-input" placeholder="Paste your YAML configuration here..."></textarea>
                 </div>
                 <div class="controls">
-                    <button class="btn btn-primary" onclick="scanConfiguration()">🔍 Scan Configuration</button>
+                    <button id="scan-btn" class="btn btn-primary">🔍 Scan Configuration</button>
                     <select id="input-type" class="select-input">
                         <option value="yaml">YAML</option>
                         <option value="json">JSON</option>
                     </select>
-                    <button class="btn btn-secondary" onclick="loadSample()">📄 Load Sample</button>
-                    <button class="btn btn-info" onclick="clearInput()">🗑️ Clear</button>
+                    <button id="load-sample-btn" class="btn btn-secondary">📄 Load Sample</button>
+                    <button id="clear-btn" class="btn btn-info">🗑️ Clear</button>
                 </div>
             </div>
 
@@ -53,9 +54,9 @@
                 </div>
                 <div id="results-section"></div>
                 <div class="controls" id="export-controls" style="display: none;">
-                    <button class="btn btn-danger" onclick="exportPDF()">📄 Download PDF Report</button>
-                    <button class="btn btn-success" onclick="exportExcel()">📥 Download Excel</button>
-                    <button class="btn btn-info" onclick="exportJSON()">📥 Download JSON</button>
+                    <button id="export-pdf-btn" class="btn btn-danger">📄 Download PDF Report</button>
+                    <button id="export-excel-btn" class="btn btn-success">📥 Download Excel</button>
+                    <button id="export-json-btn" class="btn btn-info">📥 Download JSON</button>
                 </div>
             </div>
 
@@ -63,40 +64,8 @@
                 <h2 style="margin-bottom: 20px; color: #495057;">🔧 Automatic Fixes</h2>
                 <div id="fixes-section"></div>
                 <div class="controls" id="fix-controls" style="display: none;">
-                    <button class="btn btn-success" onclick="downloadFixes()">📥 Download Fixed Config</button>
+                    <button id="download-fixes-btn" class="btn btn-success">📥 Download Fixed Config</button>
                 </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Hidden PDF Report Template -->
-    <div id="pdf-template" style="display: none;">
-        <div id="pdf-content" style="padding: 40px; font-family: Arial, sans-serif; max-width: 800px;">
-            <div style="text-align: center; margin-bottom: 40px; border-bottom: 3px solid #667eea; padding-bottom: 20px;">
-                <h1 style="color: #667eea; font-size: 32px; margin-bottom: 10px;">Security Scan Report</h1>
-                <h2 style="color: #6c757d; font-size: 18px; font-weight: normal;">Kubernetes & Docker Configuration Analysis</h2>
-                <p style="color: #6c757d; margin-top: 10px;" id="pdf-date"></p>
-            </div>
-
-            <div id="pdf-summary" style="margin-bottom: 40px;">
-                <h2 style="color: #495057; font-size: 24px; margin-bottom: 20px; border-left: 4px solid #667eea; padding-left: 15px;">Executive Summary</h2>
-                <div id="pdf-summary-stats" style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 15px; margin-bottom: 20px;"></div>
-                <div id="pdf-summary-text" style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin-top: 20px;"></div>
-            </div>
-
-            <div id="pdf-findings" style="margin-bottom: 40px;">
-                <h2 style="color: #495057; font-size: 24px; margin-bottom: 20px; border-left: 4px solid #667eea; padding-left: 15px;">Detailed Findings</h2>
-                <div id="pdf-findings-content"></div>
-            </div>
-
-            <div id="pdf-recommendations" style="margin-bottom: 40px;">
-                <h2 style="color: #495057; font-size: 24px; margin-bottom: 20px; border-left: 4px solid #667eea; padding-left: 15px;">Recommendations</h2>
-                <div id="pdf-recommendations-content"></div>
-            </div>
-
-            <div style="margin-top: 60px; padding-top: 20px; border-top: 2px solid #e9ecef; text-align: center; color: #6c757d; font-size: 12px;">
-                <p>Generated by K8s & Docker Security Scanner</p>
-                <p>This report is for informational purposes only. Please consult with security professionals for production environments.</p>
             </div>
         </div>
     </div>
