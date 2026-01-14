@@ -139,15 +139,15 @@ textarea:focus {
     gap: 8px;
 }
 
+.btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(0,0,0,0.15);
+}
+
 .btn-primary {
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     color: white;
     box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
-}
-
-.btn-primary:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
 }
 
 .btn-secondary {
@@ -157,7 +157,6 @@ textarea:focus {
 
 .btn-secondary:hover {
     background: #5a6268;
-    transform: translateY(-2px);
 }
 
 .btn-success {
@@ -167,7 +166,6 @@ textarea:focus {
 
 .btn-success:hover {
     background: #218838;
-    transform: translateY(-2px);
 }
 
 .btn-info {
@@ -177,7 +175,6 @@ textarea:focus {
 
 .btn-info:hover {
     background: #138496;
-    transform: translateY(-2px);
 }
 
 .btn-danger {
@@ -187,7 +184,6 @@ textarea:focus {
 
 .btn-danger:hover {
     background: #c82333;
-    transform: translateY(-2px);
 }
 
 .summary-grid {
@@ -414,10 +410,18 @@ textarea:focus {
     transition: all 0.3s ease;
 }
 
+.filter-btn:hover {
+    background: #f8f9fa;
+}
+
 .filter-btn.active {
     border-color: #667eea;
     background: #667eea;
     color: white;
+}
+
+.filter-btn.active:hover {
+    background: #5a6fd8;
 }
 
 .stats-bar {
