@@ -36,50 +36,28 @@ const SECRET_PATTERNS = [
     { regex: /(?:password|passwd|pwd|secret|token|api[_-]?key)\s*[:=]\s*['"]?[^\s'"`;]{8,}/, desc: 'Hardcoded Credential', severity: 'High' }
 ];
 
-// Advanced Kubernetes security rules
-const K8S_SECURITY_RULES = {
-    // Container security
-    ALLOW_PRIVILEGED_CONTAINERS: false,
-    REQUIRE_RESOURCE_LIMITS: true,
-    REQUIRE_READ_ONLY_ROOT_FS: false,
-    REQUIRE_NON_ROOT_USER: true,
-    DROP_ALL_CAPABILITIES: true,
-    ALLOWED_CAPABILITIES: [],
-    
-    // Pod security
-    ALLOW_HOST_NETWORK: false,
-    ALLOW_HOST_PID: false,
-    ALLOW_HOST_IPC: false,
-    ALLOW_HOST_PATHS: false,
-    REQUIRE_SERVICE_ACCOUNT: true,
-    
-    // Image security
-    ALLOW_LATEST_TAG: false,
-    REQUIRE_IMAGE_DIGEST: false,
-    ALLOWED_REGISTRIES: [],
-    
-    // Network security
-    REQUIRE_NETWORK_POLICIES: false,
-    ALLOW_EXTERNAL_TRAFFIC: true,
-    REQUIRE_TLS_INGRESS: true,
-    
-    // RBAC security
-    ALLOW_WILDCARD_RESOURCES: false,
-    ALLOW_WILDCARD_VERBS: false,
-    ALLOW_CLUSTER_ADMIN: false
-};
-
 // Global state
 let findings = [];
 let currentFilter = 'all';
-let autoFixes = [];
+let originalConfig = '';
+let configLines = [];
 
 // Tab switching
 function switchTab(tab) {
-    document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-    document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+    // First remove active class from all tabs
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.classList.remove('active');
+    });
     
+    // Add active class to clicked tab
     event.target.classList.add('active');
+    
+    // Hide all tab content
+    document.querySelectorAll('.tab-content').forEach(content => {
+        content.classList.remove('active');
+    });
+    
+    // Show selected tab content
     document.getElementById(`${tab}-tab`).classList.add('active');
 }
 
@@ -163,7 +141,8 @@ function scanConfiguration() {
     }
 
     findings = [];
-    autoFixes = [];
+    originalConfig = input;
+    configLines = input.split('\n');
 
     try {
         const inputType = document.getElementById('input-type').value;
@@ -186,13 +165,17 @@ function scanConfiguration() {
             console.log(`Scanning document ${index + 1}: ${doc.kind || 'Unknown'}`);
             scanDocument(doc);
             scanSecrets(doc);
-            checkCompliance(doc);
         });
 
         console.log(`Scan complete. Found ${findings.length} issues`);
         renderResults();
         renderFixes();
-        switchTab('results');
+        
+        // Switch to results tab
+        document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+        document.querySelector('.tab-btn:nth-child(2)').classList.add('active');
+        document.getElementById('results-tab').classList.add('active');
         
     } catch (error) {
         console.error('Scan error:', error);
@@ -228,8 +211,6 @@ function scanDocument(doc) {
             break;
         case 'role':
         case 'clusterrole':
-        case 'rolebinding':
-        case 'clusterrolebinding':
             checkRBAC(doc);
             break;
         case 'secret':
@@ -238,41 +219,6 @@ function scanDocument(doc) {
         case 'configmap':
             checkConfigMap(doc);
             break;
-        case 'serviceaccount':
-            checkServiceAccount(doc);
-            break;
-        case 'persistentvolume':
-        case 'persistentvolumeclaim':
-            checkStorageSecurity(doc);
-            break;
-        default:
-            checkGenericResource(doc);
-    }
-}
-
-// Advanced compliance checking
-function checkCompliance(doc) {
-    // NIST SP 800-190 compliance checks
-    if (doc.spec?.template?.spec?.containers) {
-        doc.spec.template.spec.containers.forEach(container => {
-            // Check for immutable infrastructure compliance
-            if (container.image && container.image.includes(':latest')) {
-                addFinding('immutable-infra', `Container uses mutable image tag`, doc.metadata?.name, doc.kind, 'Medium');
-            }
-            
-            // Check for defense in depth
-            if (!container.securityContext) {
-                addFinding('defense-in-depth', `Container missing security context`, doc.metadata?.name, doc.kind, 'Medium');
-            }
-        });
-    }
-    
-    // CIS Kubernetes Benchmark compliance
-    if (doc.kind === 'Pod' || doc.kind === 'Deployment') {
-        const spec = doc.spec?.template?.spec || doc.spec;
-        if (spec && !spec.securityContext?.runAsNonRoot) {
-            addFinding('cis-5.2.5', `Pod does not enforce runAsNonRoot`, doc.metadata?.name, doc.kind, 'High');
-        }
     }
 }
 
@@ -280,79 +226,46 @@ function checkCompliance(doc) {
 function checkPodSecurity(pod) {
     const spec = pod.spec || {};
     const resourceName = pod.metadata?.name || 'Unknown';
-    const podLineInfo = findLineInfo(pod, 'kind', 'Pod');
 
     console.log(`Checking pod security for: ${resourceName}`);
 
     // Host namespaces
     if (spec.hostNetwork) {
-        addFinding('hostNamespace', `Pod shares host network namespace`, resourceName, pod.kind, 'High', podLineInfo);
-        addAutoFix(pod, 'spec.hostNetwork', false);
+        addFinding('hostNamespace', `Pod shares host network namespace`, resourceName, pod.kind);
     }
     if (spec.hostPID) {
-        addFinding('hostNamespace', `Pod shares host PID namespace`, resourceName, pod.kind, 'High', podLineInfo);
-        addAutoFix(pod, 'spec.hostPID', false);
+        addFinding('hostNamespace', `Pod shares host PID namespace`, resourceName, pod.kind);
     }
     if (spec.hostIPC) {
-        addFinding('hostNamespace', `Pod shares host IPC namespace`, resourceName, pod.kind, 'High', podLineInfo);
-        addAutoFix(pod, 'spec.hostIPC', false);
+        addFinding('hostNamespace', `Pod shares host IPC namespace`, resourceName, pod.kind);
     }
 
     // Service account
     if (!spec.serviceAccountName || spec.serviceAccountName === 'default') {
-        addFinding('defaultServiceAccount', `Pod uses default service account`, resourceName, pod.kind, 'Medium', podLineInfo);
-        addAutoFix(pod, 'spec.serviceAccountName', 'custom-service-account');
-    }
-
-    // Automount service account token
-    if (spec.automountServiceAccountToken !== false) {
-        addFinding('defaultServiceAccount', `Pod automatically mounts service account token`, resourceName, pod.kind, 'Medium', podLineInfo);
-        addAutoFix(pod, 'spec.automountServiceAccountToken', false);
+        addFinding('defaultServiceAccount', `Pod uses default service account`, resourceName, pod.kind);
     }
 
     // Containers
     const containers = [...(spec.containers || []), ...(spec.initContainers || [])];
-    containers.forEach((container, index) => {
-        const containerLineInfo = findLineInfo(spec.containers || spec.initContainers, index, container.name);
-        checkContainerSecurity(container, resourceName, pod.kind, containerLineInfo);
-    });
+    containers.forEach(container => checkContainerSecurity(container, resourceName, pod.kind));
 
     // Volumes
     if (spec.volumes) {
-        spec.volumes.forEach((vol, index) => {
-            const volLineInfo = findLineInfo(spec.volumes, index, vol.name);
+        spec.volumes.forEach(vol => {
             if (vol.hostPath) {
-                addFinding('hostPathVolume', `Pod uses hostPath volume: ${vol.name}`, resourceName, pod.kind, 'High', volLineInfo);
-            }
-            if (vol.emptyDir && vol.emptyDir.medium === 'Memory') {
-                addFinding('memory-volume', `Pod uses memory-backed emptyDir volume`, resourceName, pod.kind, 'Medium', volLineInfo);
+                addFinding('hostPathVolume', `Pod uses hostPath volume: ${vol.name}`, resourceName, pod.kind);
             }
         });
     }
 
     // Security context
     if (spec.securityContext) {
-        const secCtxLineInfo = findLineInfo(spec, 'securityContext');
         if (!spec.securityContext.runAsNonRoot) {
-            addFinding('runAsRoot', `Pod does not enforce runAsNonRoot`, resourceName, pod.kind, 'High', secCtxLineInfo);
-            addAutoFix(pod, 'spec.securityContext.runAsNonRoot', true);
+            addFinding('runAsRoot', `Pod does not enforce runAsNonRoot`, resourceName, pod.kind);
         }
         if (!spec.securityContext.seccompProfile || spec.securityContext.seccompProfile.type !== 'RuntimeDefault') {
-            addFinding('seccomp', `Pod missing seccomp profile`, resourceName, pod.kind, 'Medium', secCtxLineInfo);
-            addAutoFix(pod, 'spec.securityContext.seccompProfile', { type: 'RuntimeDefault' });
+            addFinding('seccomp', `Pod missing seccomp profile`, resourceName, pod.kind);
         }
-    } else {
-        const specLineInfo = findLineInfo(pod, 'spec');
-        addFinding('security-context', `Pod missing security context`, resourceName, pod.kind, 'Medium', specLineInfo);
-        addAutoFix(pod, 'spec.securityContext', {
-            runAsNonRoot: true,
-            seccompProfile: { type: 'RuntimeDefault' }
-        });
-    }
-
-    // Node selector/affinity checks
-    if (spec.nodeSelector || spec.affinity) {
-        checkNodeSecurity(spec, resourceName, pod.kind, podLineInfo);
     }
 }
 
@@ -366,18 +279,10 @@ function checkWorkloadSecurity(workload) {
             spec: template.spec
         });
     }
-    
-    // Workload-specific checks
-    if (workload.kind === 'Deployment') {
-        const workloadLineInfo = findLineInfo(workload, 'kind', 'Deployment');
-        if (workload.spec?.strategy?.type === 'Recreate') {
-            addFinding('deployment-strategy', `Deployment uses Recreate strategy (causes downtime)`, workload.metadata?.name, workload.kind, 'Low', workloadLineInfo);
-        }
-    }
 }
 
 // Container security checks
-function checkContainerSecurity(container, resourceName, kind, lineInfo) {
+function checkContainerSecurity(container, resourceName, kind) {
     const ctx = container.securityContext || {};
     const name = container.name;
 
@@ -385,26 +290,22 @@ function checkContainerSecurity(container, resourceName, kind, lineInfo) {
 
     // Privileged
     if (ctx.privileged) {
-        addFinding('privileged', `Container '${name}' runs in privileged mode`, resourceName, kind, 'High', lineInfo);
-        addAutoFixForContainer(resourceName, kind, container, 'securityContext.privileged', false);
+        addFinding('privileged', `Container '${name}' runs in privileged mode`, resourceName, kind);
     }
 
     // Privilege escalation
     if (ctx.allowPrivilegeEscalation !== false) {
-        addFinding('allowPrivilegeEscalation', `Container '${name}' allows privilege escalation`, resourceName, kind, 'High', lineInfo);
-        addAutoFixForContainer(resourceName, kind, container, 'securityContext.allowPrivilegeEscalation', false);
+        addFinding('allowPrivilegeEscalation', `Container '${name}' allows privilege escalation`, resourceName, kind);
     }
 
     // Root user
     if (ctx.runAsUser === 0) {
-        addFinding('runAsRoot', `Container '${name}' runs as root (UID 0)`, resourceName, kind, 'High', lineInfo);
-        addAutoFixForContainer(resourceName, kind, container, 'securityContext.runAsUser', 1000);
+        addFinding('runAsRoot', `Container '${name}' runs as root (UID 0)`, resourceName, kind);
     }
 
     // Read-only root filesystem
     if (!ctx.readOnlyRootFilesystem) {
-        addFinding('readOnlyRootFS', `Container '${name}' has writable root filesystem`, resourceName, kind, 'Medium', lineInfo);
-        addAutoFixForContainer(resourceName, kind, container, 'securityContext.readOnlyRootFilesystem', true);
+        addFinding('readOnlyRootFS', `Container '${name}' has writable root filesystem`, resourceName, kind);
     }
 
     // Capabilities
@@ -413,387 +314,638 @@ function checkContainerSecurity(container, resourceName, kind, lineInfo) {
             DANGEROUS_CAPABILITIES.includes(cap.toUpperCase())
         );
         if (dangerous.length > 0) {
-            addFinding('capabilities', `Container '${name}' has dangerous capabilities: ${dangerous.join(', ')}`, resourceName, kind, 'High', lineInfo);
-            addAutoFixForContainer(resourceName, kind, container, 'securityContext.capabilities.add', 
-                ctx.capabilities.add.filter(cap => !DANGEROUS_CAPABILITIES.includes(cap.toUpperCase()))
-            );
+            addFinding('capabilities', `Container '${name}' has dangerous capabilities: ${dangerous.join(', ')}`, resourceName, kind);
         }
-    }
-    
-    if (!ctx.capabilities?.drop?.includes('ALL')) {
-        addFinding('capabilities', `Container '${name}' does not drop all capabilities`, resourceName, kind, 'Medium', lineInfo);
-        const newDrop = ctx.capabilities?.drop || [];
-        if (!newDrop.includes('ALL')) newDrop.push('ALL');
-        addAutoFixForContainer(resourceName, kind, container, 'securityContext.capabilities.drop', newDrop);
     }
 
     // Resource limits
     if (!container.resources?.limits) {
-        addFinding('resourceLimits', `Container '${name}' has no resource limits`, resourceName, kind, 'Medium', lineInfo);
-        addAutoFixForContainer(resourceName, kind, container, 'resources.limits', {
-            cpu: '500m',
-            memory: '512Mi'
-        });
-    } else {
-        if (!container.resources.limits.cpu) {
-            addFinding('resourceLimits', `Container '${name}' has no CPU limit`, resourceName, kind, 'Medium', lineInfo);
-            addAutoFixForContainer(resourceName, kind, container, 'resources.limits.cpu', '500m');
-        }
-        if (!container.resources.limits.memory) {
-            addFinding('resourceLimits', `Container '${name}' has no memory limit`, resourceName, kind, 'Medium', lineInfo);
-            addAutoFixForContainer(resourceName, kind, container, 'resources.limits.memory', '512Mi');
-        }
-    }
-    
-    if (!container.resources?.requests) {
-        addFinding('resource-requests', `Container '${name}' has no resource requests`, resourceName, kind, 'Low', lineInfo);
-        addAutoFixForContainer(resourceName, kind, container, 'resources.requests', {
-            cpu: '100m',
-            memory: '128Mi'
-        });
+        addFinding('resourceLimits', `Container '${name}' has no resource limits`, resourceName, kind);
     }
 
     // Health probes
-    if (!container.livenessProbe) {
-        addFinding('missingProbes', `Container '${name}' missing liveness probe`, resourceName, kind, 'Medium', lineInfo);
-        addAutoFixForContainer(resourceName, kind, container, 'livenessProbe', {
-            httpGet: { path: '/healthz', port: 8080 },
-            initialDelaySeconds: 15,
-            periodSeconds: 10
-        });
-    }
-    if (!container.readinessProbe) {
-        addFinding('missingProbes', `Container '${name}' missing readiness probe`, resourceName, kind, 'Medium', lineInfo);
-        addAutoFixForContainer(resourceName, kind, container, 'readinessProbe', {
-            httpGet: { path: '/ready', port: 8080 },
-            initialDelaySeconds: 5,
-            periodSeconds: 5
-        });
+    if (!container.livenessProbe || !container.readinessProbe) {
+        addFinding('missingProbes', `Container '${name}' missing health probes`, resourceName, kind);
     }
 
     // Image tag
     if (container.image && (container.image.endsWith(':latest') || !container.image.includes(':'))) {
-        addFinding('imageLatestTag', `Container '${name}' uses 'latest' or no tag`, resourceName, kind, 'Medium', lineInfo);
-    }
-    
-    if (container.image && !container.image.includes('@sha256:')) {
-        addFinding('image-digest', `Container '${name}' not using immutable image digest`, resourceName, kind, 'Low', lineInfo);
+        addFinding('imageLatestTag', `Container '${name}' uses 'latest' or no tag`, resourceName, kind);
     }
 
     // Environment variables
     if (container.env) {
-        container.env.forEach((envVar, index) => {
-            const envLineInfo = findLineInfo(container.env, index, envVar.name);
+        container.env.forEach(envVar => {
             if (envVar.valueFrom?.secretKeyRef) {
-                addFinding('secretsEnv', `Container '${name}' uses secret in env var '${envVar.name}'`, resourceName, kind, 'Medium', envLineInfo);
-            }
-            if (envVar.value && (envVar.name.toLowerCase().includes('password') || 
-                envVar.name.toLowerCase().includes('secret') || 
-                envVar.name.toLowerCase().includes('key'))) {
-                addFinding('hardcoded-env', `Container '${name}' has potentially sensitive env var '${envVar.name}'`, resourceName, kind, 'High', envLineInfo);
+                addFinding('secretsEnv', `Container '${name}' uses secret in env var '${envVar.name}'`, resourceName, kind);
             }
         });
-    }
-
-    // Ports configuration
-    if (container.ports) {
-        container.ports.forEach((port, index) => {
-            const portLineInfo = findLineInfo(container.ports, index, port.containerPort);
-            if (port.hostPort) {
-                addFinding('host-port', `Container '${name}' uses hostPort: ${port.hostPort}`, resourceName, kind, 'Medium', portLineInfo);
-            }
-        });
-    }
-}
-
-// Node security checks
-function checkNodeSecurity(spec, resourceName, kind, lineInfo) {
-    if (spec.nodeSelector && Object.keys(spec.nodeSelector).length === 0) {
-        addFinding('node-selector', `Resource has empty nodeSelector`, resourceName, kind, 'Info', lineInfo);
     }
 }
 
 // Service security checks
 function checkServiceSecurity(svc) {
     const resourceName = svc.metadata?.name || 'Unknown';
-    const svcLineInfo = findLineInfo(svc, 'kind', 'Service');
-    
     console.log(`Checking service: ${resourceName}`);
     
     if (svc.spec?.type === 'LoadBalancer') {
-        addFinding('Service-LoadBalancer', `Service exposes LoadBalancer publicly`, resourceName, svc.kind, 'Medium', svcLineInfo);
+        addFinding('Service-LoadBalancer', `Service exposes LoadBalancer publicly`, resourceName, svc.kind, 'Medium');
     }
     
     if (svc.spec?.externalIPs?.length > 0) {
-        addFinding('Service-ExternalIP', `Service uses external IPs: ${svc.spec.externalIPs.join(', ')}`, resourceName, svc.kind, 'High', svcLineInfo);
-        addAutoFix(svc, 'spec.externalIPs', []);
-    }
-    
-    if (svc.spec?.externalTrafficPolicy === 'Cluster') {
-        addFinding('external-traffic', `Service uses Cluster external traffic policy (may lose source IP)`, resourceName, svc.kind, 'Low', svcLineInfo);
-    }
-    
-    // Check for NodePort usage
-    if (svc.spec?.type === 'NodePort') {
-        addFinding('node-port', `Service uses NodePort type`, resourceName, svc.kind, 'Medium', svcLineInfo);
+        addFinding('Service-ExternalIP', `Service uses external IPs`, resourceName, svc.kind, 'High');
     }
 }
 
 // Ingress security checks
 function checkIngressSecurity(ingress) {
     const resourceName = ingress.metadata?.name || 'Unknown';
-    const ingressLineInfo = findLineInfo(ingress, 'kind', 'Ingress');
-    
     console.log(`Checking ingress: ${resourceName}`);
     
     if (!ingress.spec?.tls || ingress.spec.tls.length === 0) {
-        addFinding('Ingress-NoTLS', `Ingress does not enforce TLS`, resourceName, ingress.kind, 'High', ingressLineInfo);
-    }
-    
-    // Check for wildcard hosts
-    if (ingress.spec?.rules) {
-        ingress.spec.rules.forEach((rule, index) => {
-            const ruleLineInfo = findLineInfo(ingress.spec.rules, index, rule.host);
-            if (rule.host && rule.host.startsWith('*.')) {
-                addFinding('wildcard-host', `Ingress uses wildcard host: ${rule.host}`, resourceName, ingress.kind, 'Medium', ruleLineInfo);
-            }
-        });
-    }
-    
-    // Check ingress class
-    if (ingress.spec?.ingressClassName) {
-        addFinding('ingress-class', `Ingress uses specific ingress class: ${ingress.spec.ingressClassName}`, resourceName, ingress.kind, 'Info', ingressLineInfo);
+        addFinding('Ingress-NoTLS', `Ingress does not enforce TLS`, resourceName, ingress.kind, 'High');
     }
 }
 
 // Network policy checks
 function checkNetworkPolicy(policy) {
     const resourceName = policy.metadata?.name || 'Unknown';
-    const policyLineInfo = findLineInfo(policy, 'kind', 'NetworkPolicy');
-    
     console.log(`Checking network policy: ${resourceName}`);
     
     if (!policy.spec?.ingress) {
-        addFinding('networkPolicy', `NetworkPolicy has no ingress rules`, resourceName, policy.kind, 'High', policyLineInfo);
-        addAutoFix(policy, 'spec.ingress', [{}]);
+        addFinding('networkPolicy', `NetworkPolicy has no ingress rules`, resourceName, policy.kind);
     }
     
     if (!policy.spec?.egress) {
-        addFinding('networkPolicy', `NetworkPolicy has no egress rules`, resourceName, policy.kind, 'Medium', policyLineInfo);
-        addAutoFix(policy, 'spec.egress', [{}]);
-    }
-    
-    // Check policy types
-    if (!policy.spec?.policyTypes) {
-        addFinding('policy-types', `NetworkPolicy missing policyTypes`, resourceName, policy.kind, 'Medium', policyLineInfo);
+        addFinding('networkPolicy', `NetworkPolicy has no egress rules`, resourceName, policy.kind);
     }
 }
 
 // RBAC checks
 function checkRBAC(role) {
     const resourceName = role.metadata?.name || 'Unknown';
-    const roleLineInfo = findLineInfo(role, 'kind', role.kind);
-    
     console.log(`Checking RBAC: ${resourceName}`);
     
     if (role.rules) {
-        role.rules.forEach((rule, index) => {
-            const ruleLineInfo = findLineInfo(role.rules, index);
+        role.rules.forEach(rule => {
             if (rule.resources?.includes('*')) {
-                addFinding('RBAC-Wildcard', `${role.kind} allows wildcard resources`, resourceName, role.kind, 'High', ruleLineInfo);
+                addFinding('RBAC-Wildcard', `${role.kind} allows wildcard resources`, resourceName, role.kind, 'High');
             }
             if (rule.verbs?.includes('*')) {
-                addFinding('RBAC-Wildcard', `${role.kind} allows wildcard verbs`, resourceName, role.kind, 'High', ruleLineInfo);
-            }
-            if (rule.apiGroups?.includes('*')) {
-                addFinding('RBAC-Wildcard', `${role.kind} allows wildcard API groups`, resourceName, role.kind, 'High', ruleLineInfo);
-            }
-            
-            // Check for dangerous permissions
-            const dangerousVerbs = ['*', 'create', 'update', 'patch', 'delete'];
-            const dangerousResources = ['*', 'pods', 'secrets', 'configmaps', 'services'];
-            
-            const hasDangerous = rule.verbs?.some(v => dangerousVerbs.includes(v)) &&
-                                 rule.resources?.some(r => dangerousResources.includes(r));
-            
-            if (hasDangerous) {
-                addFinding('dangerous-rbac', `${role.kind} has potentially dangerous permissions`, resourceName, role.kind, 'High', ruleLineInfo);
+                addFinding('RBAC-Wildcard', `${role.kind} allows wildcard verbs`, resourceName, role.kind, 'High');
             }
         });
-    }
-    
-    // Check for cluster-admin
-    if (role.metadata?.name === 'cluster-admin' && role.kind === 'ClusterRole') {
-        addFinding('cluster-admin', `ClusterRole 'cluster-admin' is extremely privileged`, resourceName, role.kind, 'Critical', roleLineInfo);
     }
 }
 
 // Secret checks
 function checkSecret(secret) {
     const resourceName = secret.metadata?.name || 'Unknown';
-    const secretLineInfo = findLineInfo(secret, 'kind', 'Secret');
-    
     console.log(`Checking secret: ${resourceName}`);
     
     if (secret.data) {
-        Object.keys(secret.data).forEach((key, index) => {
-            const keyLineInfo = findLineInfo(secret.data, key);
+        Object.keys(secret.data).forEach(key => {
             try {
                 const decoded = atob(secret.data[key]);
                 SECRET_PATTERNS.forEach(pattern => {
                     if (pattern.regex.test(decoded)) {
-                        addFinding('Secret-Exposed', `Secret contains ${pattern.desc} in key '${key}'`, resourceName, secret.kind, 'Critical', keyLineInfo);
+                        addFinding('Secret-Exposed', `Secret contains ${pattern.desc} in key '${key}'`, resourceName, secret.kind, 'Critical');
                     }
                 });
             } catch (e) {
                 // Invalid base64
-                addFinding('invalid-base64', `Secret key '${key}' contains invalid base64 data`, resourceName, secret.kind, 'Low', keyLineInfo);
             }
         });
-    }
-    
-    if (secret.stringData) {
-        Object.keys(secret.stringData).forEach(key => {
-            const value = secret.stringData[key];
-            SECRET_PATTERNS.forEach(pattern => {
-                if (pattern.regex.test(value)) {
-                    addFinding('stringdata-secret', `Secret stringData contains ${pattern.desc} in key '${key}'`, resourceName, secret.kind, 'Critical', secretLineInfo);
-                }
-            });
-        });
-    }
-    
-    // Check secret type
-    if (secret.type === 'Opaque') {
-        addFinding('opaque-secret', `Secret uses Opaque type (consider using specific type)`, resourceName, secret.kind, 'Low', secretLineInfo);
     }
 }
 
 // ConfigMap checks
 function checkConfigMap(configMap) {
     const resourceName = configMap.metadata?.name || 'Unknown';
-    const cmLineInfo = findLineInfo(configMap, 'kind', 'ConfigMap');
-    
     console.log(`Checking configmap: ${resourceName}`);
     
     if (configMap.data) {
-        Object.entries(configMap.data).forEach(([key, value]) => {
-            const valueLineInfo = findLineInfo(configMap.data, key);
+        Object.values(configMap.data).forEach(value => {
             SECRET_PATTERNS.forEach(pattern => {
                 if (pattern.regex.test(value)) {
-                    addFinding('ConfigMap-Secret', `ConfigMap contains ${pattern.desc} in key '${key}'`, resourceName, configMap.kind, 'High', valueLineInfo);
+                    addFinding('ConfigMap-Secret', `ConfigMap contains ${pattern.desc}`, resourceName, configMap.kind, 'High');
                 }
             });
         });
     }
-    
-    if (configMap.binaryData) {
-        addFinding('binary-data', `ConfigMap uses binaryData field`, resourceName, configMap.kind, 'Info', cmLineInfo);
-    }
-}
-
-// Service Account checks
-function checkServiceAccount(sa) {
-    const resourceName = sa.metadata?.name || 'Unknown';
-    const saLineInfo = findLineInfo(sa, 'kind', 'ServiceAccount');
-    
-    console.log(`Checking service account: ${resourceName}`);
-    
-    if (sa.automountServiceAccountToken === undefined || sa.automountServiceAccountToken === true) {
-        addFinding('auto-mount-token', `ServiceAccount automatically mounts token`, resourceName, sa.kind, 'Medium', saLineInfo);
-        addAutoFix(sa, 'automountServiceAccountToken', false);
-    }
-    
-    if (sa.imagePullSecrets && sa.imagePullSecrets.length > 0) {
-        addFinding('image-pull-secrets', `ServiceAccount has image pull secrets`, resourceName, sa.kind, 'Info', saLineInfo);
-    }
-}
-
-// Storage security checks
-function checkStorageSecurity(storage) {
-    const resourceName = storage.metadata?.name || 'Unknown';
-    const storageLineInfo = findLineInfo(storage, 'kind', storage.kind);
-    
-    console.log(`Checking storage: ${resourceName}`);
-    
-    if (storage.kind === 'PersistentVolume') {
-        if (storage.spec?.hostPath) {
-            addFinding('hostpath-pv', `PersistentVolume uses hostPath`, resourceName, storage.kind, 'High', storageLineInfo);
-        }
-        
-        if (storage.spec?.accessModes?.includes('ReadWriteMany')) {
-            addFinding('rwx-access', `PersistentVolume allows ReadWriteMany access`, resourceName, storage.kind, 'Medium', storageLineInfo);
-        }
-    }
-    
-    if (storage.kind === 'PersistentVolumeClaim') {
-        if (storage.spec?.storageClassName === '') {
-            addFinding('default-storage', `PersistentVolumeClaim uses default storage class`, resourceName, storage.kind, 'Low', storageLineInfo);
-        }
-    }
-}
-
-// Generic resource checks
-function checkGenericResource(resource) {
-    const resourceName = resource.metadata?.name || 'Unknown';
-    const resourceLineInfo = findLineInfo(resource, 'kind', resource.kind);
-    
-    // Check namespace
-    if (resource.metadata && !resource.metadata.namespace && 
-        resource.kind !== 'Namespace' && resource.kind !== 'ClusterRole' && 
-        resource.kind !== 'ClusterRoleBinding' && resource.kind !== 'PersistentVolume') {
-        addFinding('missing-namespace', `${resource.kind} not assigned to namespace`, resourceName, resource.kind, 'Low', resourceLineInfo);
-    }
-    
-    // Check labels
-    if (resource.metadata && (!resource.metadata.labels || Object.keys(resource.metadata.labels).length === 0)) {
-        addFinding('missing-labels', `${resource.kind} has no labels`, resourceName, resource.kind, 'Info', resourceLineInfo);
-    }
-    
-    // Check annotations for security context
-    if (resource.metadata?.annotations) {
-        checkSecurityAnnotations(resource.metadata.annotations, resourceName, resource.kind, resourceLineInfo);
-    }
-}
-
-// Check security annotations
-function checkSecurityAnnotations(annotations, resourceName, kind, lineInfo) {
-    // Check for Pod Security Standards
-    if (annotations['pod-security.kubernetes.io/enforce']) {
-        addFinding('pss-enforced', `${kind} has Pod Security Standard enforced`, resourceName, kind, 'Info', lineInfo);
-    }
-    
-    // Check for deprecated annotations
-    const deprecatedAnnotations = [
-        'kubernetes.io/ingress.class',
-        'helm.sh/hook',
-        'sidecar.istio.io/inject'
-    ];
-    
-    deprecatedAnnotations.forEach(deprecated => {
-        if (annotations[deprecated]) {
-            addFinding('deprecated-annotation', `${kind} uses deprecated annotation: ${deprecated}`, resourceName, kind, 'Low', lineInfo);
-        }
-    });
 }
 
 // Secret pattern scanning
 function scanSecrets(doc) {
     const docString = JSON.stringify(doc);
     const resourceName = doc.metadata?.name || 'Unknown';
-    const docLineInfo = findLineInfo(doc, 'kind', doc.kind);
     
     SECRET_PATTERNS.forEach(pattern => {
         const matches = docString.match(new RegExp(pattern.regex, 'g'));
         if (matches) {
             matches.slice(0, 3).forEach(match => {
-                addFinding('Hardcoded-Secret', `${pattern.desc}: ${match.substring(0, 20)}...`, resourceName, doc.kind || 'Unknown', pattern.severity, docLineInfo);
+                addFinding('Hardcoded-Secret', `${pattern.desc}: ${match.substring(0, 20)}...`, resourceName, doc.kind || 'Unknown', pattern.severity);
             });
         }
     });
 }
 
+// Find line information for code snippets
+function findLineInfo(obj, key, value) {
+    try {
+        const jsonString = JSON.stringify(obj);
+        const searchString = `"${key}":${JSON.stringify(value)}`;
+        const index = originalConfig.indexOf(searchString);
+        
+        if (index === -1) {
+            return { line: 'N/A', column: 'N/A', snippet: 'N/A' };
+        }
+        
+        const linesBefore = originalConfig.substring(0, index).split('\n');
+        const line = linesBefore.length;
+        const column = linesBefore[linesBefore.length - 1].length + 1;
+        
+        const startLine = Math.max(0, line - 2);
+        const endLine = Math.min(configLines.length, line + 2);
+        const snippet = configLines.slice(startLine, endLine).join('\n');
+        
+        return { line, column, snippet };
+    } catch (e) {
+        return { line: 'N/A', column: 'N/A', snippet: 'N/A' };
+    }
+}
+
 // Add finding to results
-function addFinding(type, message, resource, kind, customSeverity = null, lineInfo = null) {
+function addFinding(type, message, resource, kind, customSeverity = null) {
     const benchmark = CIS_BENCHMARKS[type];
-    const id = benchmark?.
+    const id = benchmark?.id || type;
+    const title = benchmark?.title || type;
+    const severity = customSeverity || benchmark?.severity || 'Medium';
+    
+    console.log(`Finding: [${severity}] ${title} - ${message}`);
+    
+    findings.push({
+        id,
+        title,
+        message,
+        severity,
+        resource,
+        kind,
+        line: 'N/A',
+        snippet: 'N/A',
+        remediation: getRemediation(type)
+    });
+}
+
+// Get remediation advice
+function getRemediation(type) {
+    const remediations = {
+        privileged: 'Set securityContext.privileged to false',
+        allowPrivilegeEscalation: 'Set securityContext.allowPrivilegeEscalation to false',
+        runAsRoot: 'Set securityContext.runAsUser to non-zero and runAsNonRoot to true',
+        readOnlyRootFS: 'Set securityContext.readOnlyRootFilesystem to true',
+        capabilities: 'Remove dangerous capabilities and drop all with securityContext.capabilities.drop: ["ALL"]',
+        resourceLimits: 'Define resources.limits for CPU and memory',
+        imageLatestTag: 'Use specific immutable image tags',
+        hostNamespace: 'Set hostNetwork, hostPID, and hostIPC to false',
+        defaultServiceAccount: 'Create and use a dedicated ServiceAccount',
+        hostPathVolume: 'Avoid hostPath volumes, use PersistentVolumes instead',
+        missingProbes: 'Add livenessProbe and readinessProbe',
+        networkPolicy: 'Define NetworkPolicy with specific ingress/egress rules',
+        secretsEnv: 'Mount secrets as volumes instead of environment variables',
+        seccomp: 'Set securityContext.seccompProfile.type to RuntimeDefault',
+        appArmor: 'Add AppArmor annotations',
+        'Service-LoadBalancer': 'Consider using ClusterIP or NodePort instead',
+        'Service-ExternalIP': 'Remove externalIPs configuration',
+        'Ingress-NoTLS': 'Configure TLS certificates for HTTPS',
+        'RBAC-Wildcard': 'Specify exact resources and verbs needed',
+        'Secret-Exposed': 'Remove sensitive data from secrets, use external secret management',
+        'ConfigMap-Secret': 'Move sensitive data to Kubernetes Secrets',
+        'Hardcoded-Secret': 'Remove hardcoded secrets, use Kubernetes Secrets or external vaults'
+    };
+    return remediations[type] || 'Review and fix the security issue';
+}
+
+// Render results
+function renderResults() {
+    const summarySection = document.getElementById('summary-section');
+    const resultsSection = document.getElementById('results-section');
+    
+    console.log(`Rendering ${findings.length} findings`);
+    
+    if (findings.length === 0) {
+        summarySection.innerHTML = '';
+        resultsSection.innerHTML = `
+            <div class="no-findings">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                </svg>
+                <h2>No Security Issues Found!</h2>
+                <p>Your configuration appears to be secure.</p>
+            </div>
+        `;
+        document.getElementById('filter-bar').style.display = 'none';
+        document.getElementById('export-controls').style.display = 'none';
+        return;
+    }
+
+    const counts = {
+        Critical: 0,
+        High: 0,
+        Medium: 0,
+        Low: 0,
+        Info: 0
+    };
+
+    findings.forEach(f => counts[f.severity]++);
+
+    summarySection.innerHTML = `
+        <div class="summary-grid">
+            <div class="summary-card critical">
+                <div class="summary-count">${counts.Critical}</div>
+                <div class="summary-label">Critical</div>
+            </div>
+            <div class="summary-card high">
+                <div class="summary-count">${counts.High}</div>
+                <div class="summary-label">High</div>
+            </div>
+            <div class="summary-card medium">
+                <div class="summary-count">${counts.Medium}</div>
+                <div class="summary-label">Medium</div>
+            </div>
+            <div class="summary-card low">
+                <div class="summary-count">${counts.Low}</div>
+                <div class="summary-label">Low</div>
+            </div>
+            <div class="summary-card info">
+                <div class="summary-count">${counts.Info}</div>
+                <div class="summary-label">Info</div>
+            </div>
+        </div>
+    `;
+
+    renderFindingsTable();
+    document.getElementById('filter-bar').style.display = 'flex';
+    document.getElementById('export-controls').style.display = 'flex';
+}
+
+// Render findings table
+function renderFindingsTable() {
+    const resultsSection = document.getElementById('results-section');
+    const filtered = currentFilter === 'all' 
+        ? findings 
+        : findings.filter(f => f.severity === currentFilter);
+
+    console.log(`Rendering ${filtered.length} filtered findings (filter: ${currentFilter})`);
+
+    if (filtered.length === 0) {
+        resultsSection.innerHTML = '<div class="no-findings"><p>No findings for selected filter.</p></div>';
+        return;
+    }
+
+    let tableHTML = `
+        <table class="findings-table">
+            <thead>
+                <tr>
+                    <th>Severity</th>
+                    <th>ID</th>
+                    <th>Title</th>
+                    <th>Resource</th>
+                    <th>Kind</th>
+                    <th>Message</th>
+                    <th>Remediation</th>
+                </tr>
+            </thead>
+            <tbody>
+    `;
+
+    filtered.forEach(finding => {
+        tableHTML += `
+            <tr>
+                <td><span class="severity-badge severity-${finding.severity.toLowerCase()}">${finding.severity}</span></td>
+                <td><code>${finding.id}</code></td>
+                <td>${finding.title}</td>
+                <td>${finding.resource}</td>
+                <td>${finding.kind}</td>
+                <td>${finding.message}</td>
+                <td>${finding.remediation}</td>
+            </tr>
+        `;
+    });
+
+    tableHTML += '</tbody></table>';
+    resultsSection.innerHTML = tableHTML;
+}
+
+// Render fixes
+function renderFixes() {
+    const fixesSection = document.getElementById('fixes-section');
+    
+    console.log('Rendering fixes');
+    
+    if (findings.length === 0) {
+        fixesSection.innerHTML = '<div class="no-findings"><p>No fixes needed - configuration is secure!</p></div>';
+        document.getElementById('fix-controls').style.display = 'none';
+        return;
+    }
+
+    let fixHTML = '<div class="stats-bar"><strong>Auto-fix suggestions generated based on findings</strong></div>';
+    
+    const groupedFindings = {};
+    findings.forEach(f => {
+        const key = `${f.kind}:${f.resource}`;
+        if (!groupedFindings[key]) {
+            groupedFindings[key] = [];
+        }
+        groupedFindings[key].push(f);
+    });
+
+    Object.keys(groupedFindings).forEach(key => {
+        const [kind, resource] = key.split(':');
+        fixHTML += `
+            <div class="fix-item">
+                <h4>${kind}: ${resource}</h4>
+                <ul>
+        `;
+        
+        groupedFindings[key].forEach(f => {
+            fixHTML += `<li><strong>${f.title}:</strong> ${f.remediation}</li>`;
+        });
+        
+        fixHTML += '</ul></div>';
+    });
+
+    fixesSection.innerHTML = fixHTML;
+    document.getElementById('fix-controls').style.display = 'flex';
+}
+
+// Filter findings
+function filterFindings(severity) {
+    currentFilter = severity;
+    console.log(`Filtering by: ${severity}`);
+    document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active'));
+    event.target.classList.add('active');
+    renderFindingsTable();
+}
+
+// Export PDF
+async function exportPDF() {
+    console.log('Generating PDF report...');
+    
+    try {
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF('p', 'mm', 'a4');
+        
+        // Get counts
+        const counts = {
+            Critical: 0,
+            High: 0,
+            Medium: 0,
+            Low: 0,
+            Info: 0
+        };
+        findings.forEach(f => counts[f.severity]++);
+        
+        // Title
+        doc.setFontSize(24);
+        doc.setTextColor(102, 126, 234);
+        doc.text('Security Scan Report', 105, 20, { align: 'center' });
+        
+        doc.setFontSize(12);
+        doc.setTextColor(108, 117, 125);
+        doc.text('Kubernetes & Docker Configuration Analysis', 105, 28, { align: 'center' });
+        doc.text(`Generated: ${new Date().toLocaleString()}`, 105, 34, { align: 'center' });
+        
+        // Line separator
+        doc.setDrawColor(102, 126, 234);
+        doc.setLineWidth(0.5);
+        doc.line(20, 40, 190, 40);
+        
+        let yPos = 50;
+        
+        // Executive Summary
+        doc.setFontSize(16);
+        doc.setTextColor(73, 80, 87);
+        doc.text('Executive Summary', 20, yPos);
+        yPos += 10;
+        
+        doc.setFontSize(10);
+        doc.setTextColor(108, 117, 125);
+        doc.text(`Total Findings: ${findings.length}`, 20, yPos);
+        yPos += 6;
+        doc.text(`Critical: ${counts.Critical}  |  High: ${counts.High}  |  Medium: ${counts.Medium}  |  Low: ${counts.Low}  |  Info: ${counts.Info}`, 20, yPos);
+        yPos += 10;
+        
+        // Risk Assessment
+        const riskLevel = counts.Critical > 0 ? 'CRITICAL' : 
+                         counts.High > 0 ? 'HIGH' : 
+                         counts.Medium > 0 ? 'MEDIUM' : 'LOW';
+        
+        doc.setFontSize(11);
+        doc.text(`Overall Risk Level: ${riskLevel}`, 20, yPos);
+        yPos += 10;
+        
+        // Findings by Severity
+        doc.setFontSize(16);
+        doc.setTextColor(73, 80, 87);
+        doc.text('Detailed Findings', 20, yPos);
+        yPos += 8;
+        
+        const severities = ['Critical', 'High', 'Medium', 'Low', 'Info'];
+        
+        severities.forEach(severity => {
+            const severityFindings = findings.filter(f => f.severity === severity);
+            if (severityFindings.length === 0) return;
+            
+            // Check if we need a new page
+            if (yPos > 250) {
+                doc.addPage();
+                yPos = 20;
+            }
+            
+            doc.setFontSize(12);
+            doc.setTextColor(73, 80, 87);
+            doc.text(`${severity} Severity (${severityFindings.length})`, 20, yPos);
+            yPos += 6;
+            
+            doc.setFontSize(9);
+            doc.setTextColor(108, 117, 125);
+            
+            severityFindings.forEach((finding, index) => {
+                if (yPos > 270) {
+                    doc.addPage();
+                    yPos = 20;
+                }
+                
+                const text = `${index + 1}. [${finding.id}] ${finding.title}`;
+                doc.text(text, 25, yPos);
+                yPos += 5;
+                
+                const resourceText = `   Resource: ${finding.resource} (${finding.kind})`;
+                doc.text(resourceText, 25, yPos);
+                yPos += 4;
+                
+                const messageLines = doc.splitTextToSize(`   ${finding.message}`, 160);
+                doc.text(messageLines, 25, yPos);
+                yPos += messageLines.length * 4;
+                
+                const remediationLines = doc.splitTextToSize(`   Fix: ${finding.remediation}`, 160);
+                doc.setTextColor(40, 167, 69);
+                doc.text(remediationLines, 25, yPos);
+                doc.setTextColor(108, 117, 125);
+                yPos += remediationLines.length * 4 + 3;
+            });
+            
+            yPos += 5;
+        });
+        
+        // Add footer with page numbers
+        const pageCount = doc.internal.getNumberOfPages();
+        for (let i = 1; i <= pageCount; i++) {
+            doc.setPage(i);
+            doc.setFontSize(8);
+            doc.setTextColor(150);
+            doc.text(`Page ${i} of ${pageCount}`, 105, 290, { align: 'center' });
+            doc.text('Generated by K8s & Docker Security Scanner', 105, 295, { align: 'center' });
+        }
+        
+        // Save the PDF
+        doc.save('security-scan-report.pdf');
+        console.log('PDF report generated successfully');
+        
+    } catch (error) {
+        console.error('Error generating PDF:', error);
+        alert('Error generating PDF report: ' + error.message);
+    }
+}
+
+// Export Excel
+function exportExcel() {
+    console.log('Exporting to Excel...');
+    
+    if (findings.length === 0) {
+        alert('No findings to export');
+        return;
+    }
+    
+    try {
+        const data = findings.map(f => ({
+            'Severity': f.severity,
+            'ID': f.id,
+            'Title': f.title,
+            'Resource': f.resource,
+            'Kind': f.kind,
+            'Message': f.message,
+            'Remediation': f.remediation,
+            'Line': f.line
+        }));
+        
+        const worksheet = XLSX.utils.json_to_sheet(data);
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, 'Security Findings');
+        
+        // Auto-size columns
+        const wscols = [
+            {wch: 10}, // Severity
+            {wch: 15}, // ID
+            {wch: 25}, // Title
+            {wch: 20}, // Resource
+            {wch: 15}, // Kind
+            {wch: 40}, // Message
+            {wch: 50}, // Remediation
+            {wch: 8}   // Line
+        ];
+        worksheet['!cols'] = wscols;
+        
+        XLSX.writeFile(workbook, 'security-findings.xlsx');
+        console.log('Excel file exported successfully');
+        
+    } catch (error) {
+        console.error('Error exporting to Excel:', error);
+        alert('Error exporting to Excel: ' + error.message);
+    }
+}
+
+// Export JSON
+function exportJSON() {
+    console.log('Exporting to JSON...');
+    
+    if (findings.length === 0) {
+        alert('No findings to export');
+        return;
+    }
+    
+    try {
+        const report = {
+            metadata: {
+                generatedAt: new Date().toISOString(),
+                totalFindings: findings.length,
+                scannerVersion: '1.0.0'
+            },
+            summary: {
+                Critical: findings.filter(f => f.severity === 'Critical').length,
+                High: findings.filter(f => f.severity === 'High').length,
+                Medium: findings.filter(f => f.severity === 'Medium').length,
+                Low: findings.filter(f => f.severity === 'Low').length,
+                Info: findings.filter(f => f.severity === 'Info').length
+            },
+            findings: findings
+        };
+        
+        const jsonStr = JSON.stringify(report, null, 2);
+        const blob = new Blob([jsonStr], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'security-findings.json';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        
+        console.log('JSON file exported successfully');
+        
+    } catch (error) {
+        console.error('Error exporting to JSON:', error);
+        alert('Error exporting to JSON: ' + error.message);
+    }
+}
+
+// Download fixes
+function downloadFixes() {
+    console.log('Downloading fixes...');
+    
+    if (findings.length === 0) {
+        alert('No fixes to download');
+        return;
+    }
+    
+    try {
+        // Create a template with fixes applied
+        let fixesContent = `# Auto-generated security fixes\n# Generated: ${new Date().toLocaleString()}\n# Total issues found: ${findings.length}\n\n`;
+        
+        // Group findings by resource type
+        const fixesByType = {
+            'Container Security': [
+                'privileged',
+                'allowPrivilegeEscalation', 
+                'runAsRoot',
+                'readOnlyRootFS',
+                'capabilities'
+            ],
+            'Resource Management': [
+                'resourceLimits',
+                'missingProbes'
+            ],
+            'Network Security': [
+                'hostNamespace',
+                'networkPolicy',
+                'Service-LoadBalancer',
+                'Service-ExternalIP',
+                'Ingress-NoTLS'
+            ],
+            'Secrets Management': [
+                'secretsEnv',
+                'Secret-Exposed',
+                'ConfigMap-Se
