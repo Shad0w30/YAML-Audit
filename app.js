@@ -39,25 +39,23 @@ const SECRET_PATTERNS = [
 // Global state
 let findings = [];
 let currentFilter = 'all';
-let originalConfig = '';
-let configLines = [];
 
 // Tab switching
 function switchTab(tab) {
-    // First remove active class from all tabs
+    // First remove active class from all tab buttons
     document.querySelectorAll('.tab-btn').forEach(btn => {
         btn.classList.remove('active');
     });
     
-    // Add active class to clicked tab
-    event.target.classList.add('active');
-    
-    // Hide all tab content
+    // Remove active class from all tab contents
     document.querySelectorAll('.tab-content').forEach(content => {
         content.classList.remove('active');
     });
     
-    // Show selected tab content
+    // Add active class to clicked tab button
+    event.target.classList.add('active');
+    
+    // Show the selected tab content
     document.getElementById(`${tab}-tab`).classList.add('active');
 }
 
@@ -141,8 +139,6 @@ function scanConfiguration() {
     }
 
     findings = [];
-    originalConfig = input;
-    configLines = input.split('\n');
 
     try {
         const inputType = document.getElementById('input-type').value;
@@ -172,10 +168,11 @@ function scanConfiguration() {
         renderFixes();
         
         // Switch to results tab
-        document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-        document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
-        document.querySelector('.tab-btn:nth-child(2)').classList.add('active');
-        document.getElementById('results-tab').classList.add('active');
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            if (btn.textContent.includes('Results')) {
+                btn.click();
+            }
+        });
         
     } catch (error) {
         console.error('Scan error:', error);
@@ -450,31 +447,6 @@ function scanSecrets(doc) {
     });
 }
 
-// Find line information for code snippets
-function findLineInfo(obj, key, value) {
-    try {
-        const jsonString = JSON.stringify(obj);
-        const searchString = `"${key}":${JSON.stringify(value)}`;
-        const index = originalConfig.indexOf(searchString);
-        
-        if (index === -1) {
-            return { line: 'N/A', column: 'N/A', snippet: 'N/A' };
-        }
-        
-        const linesBefore = originalConfig.substring(0, index).split('\n');
-        const line = linesBefore.length;
-        const column = linesBefore[linesBefore.length - 1].length + 1;
-        
-        const startLine = Math.max(0, line - 2);
-        const endLine = Math.min(configLines.length, line + 2);
-        const snippet = configLines.slice(startLine, endLine).join('\n');
-        
-        return { line, column, snippet };
-    } catch (e) {
-        return { line: 'N/A', column: 'N/A', snippet: 'N/A' };
-    }
-}
-
 // Add finding to results
 function addFinding(type, message, resource, kind, customSeverity = null) {
     const benchmark = CIS_BENCHMARKS[type];
@@ -491,8 +463,6 @@ function addFinding(type, message, resource, kind, customSeverity = null) {
         severity,
         resource,
         kind,
-        line: 'N/A',
-        snippet: 'N/A',
         remediation: getRemediation(type)
     });
 }
@@ -692,6 +662,11 @@ function filterFindings(severity) {
 async function exportPDF() {
     console.log('Generating PDF report...');
     
+    if (findings.length === 0) {
+        alert('No findings to export');
+        return;
+    }
+    
     try {
         const { jsPDF } = window.jspdf;
         const doc = new jsPDF('p', 'mm', 'a4');
@@ -769,183 +744,3 @@ async function exportPDF() {
             yPos += 6;
             
             doc.setFontSize(9);
-            doc.setTextColor(108, 117, 125);
-            
-            severityFindings.forEach((finding, index) => {
-                if (yPos > 270) {
-                    doc.addPage();
-                    yPos = 20;
-                }
-                
-                const text = `${index + 1}. [${finding.id}] ${finding.title}`;
-                doc.text(text, 25, yPos);
-                yPos += 5;
-                
-                const resourceText = `   Resource: ${finding.resource} (${finding.kind})`;
-                doc.text(resourceText, 25, yPos);
-                yPos += 4;
-                
-                const messageLines = doc.splitTextToSize(`   ${finding.message}`, 160);
-                doc.text(messageLines, 25, yPos);
-                yPos += messageLines.length * 4;
-                
-                const remediationLines = doc.splitTextToSize(`   Fix: ${finding.remediation}`, 160);
-                doc.setTextColor(40, 167, 69);
-                doc.text(remediationLines, 25, yPos);
-                doc.setTextColor(108, 117, 125);
-                yPos += remediationLines.length * 4 + 3;
-            });
-            
-            yPos += 5;
-        });
-        
-        // Add footer with page numbers
-        const pageCount = doc.internal.getNumberOfPages();
-        for (let i = 1; i <= pageCount; i++) {
-            doc.setPage(i);
-            doc.setFontSize(8);
-            doc.setTextColor(150);
-            doc.text(`Page ${i} of ${pageCount}`, 105, 290, { align: 'center' });
-            doc.text('Generated by K8s & Docker Security Scanner', 105, 295, { align: 'center' });
-        }
-        
-        // Save the PDF
-        doc.save('security-scan-report.pdf');
-        console.log('PDF report generated successfully');
-        
-    } catch (error) {
-        console.error('Error generating PDF:', error);
-        alert('Error generating PDF report: ' + error.message);
-    }
-}
-
-// Export Excel
-function exportExcel() {
-    console.log('Exporting to Excel...');
-    
-    if (findings.length === 0) {
-        alert('No findings to export');
-        return;
-    }
-    
-    try {
-        const data = findings.map(f => ({
-            'Severity': f.severity,
-            'ID': f.id,
-            'Title': f.title,
-            'Resource': f.resource,
-            'Kind': f.kind,
-            'Message': f.message,
-            'Remediation': f.remediation,
-            'Line': f.line
-        }));
-        
-        const worksheet = XLSX.utils.json_to_sheet(data);
-        const workbook = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(workbook, worksheet, 'Security Findings');
-        
-        // Auto-size columns
-        const wscols = [
-            {wch: 10}, // Severity
-            {wch: 15}, // ID
-            {wch: 25}, // Title
-            {wch: 20}, // Resource
-            {wch: 15}, // Kind
-            {wch: 40}, // Message
-            {wch: 50}, // Remediation
-            {wch: 8}   // Line
-        ];
-        worksheet['!cols'] = wscols;
-        
-        XLSX.writeFile(workbook, 'security-findings.xlsx');
-        console.log('Excel file exported successfully');
-        
-    } catch (error) {
-        console.error('Error exporting to Excel:', error);
-        alert('Error exporting to Excel: ' + error.message);
-    }
-}
-
-// Export JSON
-function exportJSON() {
-    console.log('Exporting to JSON...');
-    
-    if (findings.length === 0) {
-        alert('No findings to export');
-        return;
-    }
-    
-    try {
-        const report = {
-            metadata: {
-                generatedAt: new Date().toISOString(),
-                totalFindings: findings.length,
-                scannerVersion: '1.0.0'
-            },
-            summary: {
-                Critical: findings.filter(f => f.severity === 'Critical').length,
-                High: findings.filter(f => f.severity === 'High').length,
-                Medium: findings.filter(f => f.severity === 'Medium').length,
-                Low: findings.filter(f => f.severity === 'Low').length,
-                Info: findings.filter(f => f.severity === 'Info').length
-            },
-            findings: findings
-        };
-        
-        const jsonStr = JSON.stringify(report, null, 2);
-        const blob = new Blob([jsonStr], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'security-findings.json';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-        
-        console.log('JSON file exported successfully');
-        
-    } catch (error) {
-        console.error('Error exporting to JSON:', error);
-        alert('Error exporting to JSON: ' + error.message);
-    }
-}
-
-// Download fixes
-function downloadFixes() {
-    console.log('Downloading fixes...');
-    
-    if (findings.length === 0) {
-        alert('No fixes to download');
-        return;
-    }
-    
-    try {
-        // Create a template with fixes applied
-        let fixesContent = `# Auto-generated security fixes\n# Generated: ${new Date().toLocaleString()}\n# Total issues found: ${findings.length}\n\n`;
-        
-        // Group findings by resource type
-        const fixesByType = {
-            'Container Security': [
-                'privileged',
-                'allowPrivilegeEscalation', 
-                'runAsRoot',
-                'readOnlyRootFS',
-                'capabilities'
-            ],
-            'Resource Management': [
-                'resourceLimits',
-                'missingProbes'
-            ],
-            'Network Security': [
-                'hostNamespace',
-                'networkPolicy',
-                'Service-LoadBalancer',
-                'Service-ExternalIP',
-                'Ingress-NoTLS'
-            ],
-            'Secrets Management': [
-                'secretsEnv',
-                'Secret-Exposed',
-                'ConfigMap-Se
