@@ -639,4 +639,843 @@ options:
                 <div class="progress-bar">
                     <div class="progress-fill" id="progressFill"></div>
                 </div>
-                <div
+                <div class="progress-stats">
+                    <span>Status: <span id="scanStatus">Idle</span></span>
+                    <span>Targets: <span id="targetCount">0</span></span>
+                    <span>Ports: <span id="portCount">0</span></span>
+                </div>
+            </div>
+
+            <!-- Scan Results Dashboard -->
+            <div class="scan-results" id="scanResults">
+                <div class="results-title">Scan Results Dashboard</div>
+                
+                <div class="dashboard-container">
+                    <!-- Risk Overview -->
+                    <div class="risk-overview">
+                        <div class="overview-title">
+                            <span class="button-icon">⚠️</span>
+                            Risk Overview
+                        </div>
+                        <div class="risk-meter">
+                            <div class="meter-background"></div>
+                            <div class="meter-needle" id="riskNeedle"></div>
+                        </div>
+                        <div class="risk-level" id="riskLevel">Low</div>
+                        <div class="severity-breakdown">
+                            <div class="severity-item severity-critical">
+                                <div class="severity-count" id="criticalCount">0</div>
+                                <div class="severity-label">Critical</div>
+                            </div>
+                            <div class="severity-item severity-high">
+                                <div class="severity-count" id="highCount">0</div>
+                                <div class="severity-label">High</div>
+                            </div>
+                            <div class="severity-item severity-medium">
+                                <div class="severity-count" id="mediumCount">0</div>
+                                <div class="severity-label">Medium</div>
+                            </div>
+                            <div class="severity-item severity-low">
+                                <div class="severity-count" id="lowCount">0</div>
+                                <div class="severity-label">Low</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Scan Summary -->
+                    <div class="scan-summary">
+                        <div class="overview-title">
+                            <span class="button-icon">📊</span>
+                            Scan Summary
+                        </div>
+                        <div class="summary-grid">
+                            <div class="summary-item">
+                                <span class="summary-label">Targets Scanned</span>
+                                <span class="summary-value" id="summaryTargets">0</span>
+                            </div>
+                            <div class="summary-item">
+                                <span class="summary-label">Open Ports</span>
+                                <span class="summary-value" id="summaryOpenPorts">0</span>
+                            </div>
+                            <div class="summary-item">
+                                <span class="summary-label">Services Found</span>
+                                <span class="summary-value" id="summaryServices">0</span>
+                            </div>
+                            <div class="summary-item">
+                                <span class="summary-label">Scan Duration</span>
+                                <span class="summary-value" id="summaryDuration">0s</span>
+                            </div>
+                            <div class="summary-item">
+                                <span class="summary-label">Vulnerabilities</span>
+                                <span class="summary-value" id="summaryVulnerabilities">0</span>
+                            </div>
+                            <div class="summary-item">
+                                <span class="summary-label">Risk Score</span>
+                                <span class="summary-value" id="summaryRiskScore">0/100</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Vulnerability List -->
+                <div class="vulnerability-list">
+                    <div class="vuln-list-title">Detected Vulnerabilities</div>
+                    <div id="vulnerabilityList">
+                        <!-- Vulnerabilities will be inserted here -->
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Status Message -->
+        <div class="status-message" id="statusMessage"></div>
+    </div>
+
+    <!-- App.js Simulation -->
+    <script>
+        // App.js - Controls and Validation System
+        const App = {
+            // Configuration validation
+            validateYAML(yamlText) {
+                const errors = [];
+                const warnings = [];
+                const lines = yamlText.split('\n');
+                
+                // Check for required sections
+                if (!yamlText.includes('scan:')) {
+                    errors.push('Missing required section: scan');
+                }
+                
+                // Validate scan parameters
+                for (const line of lines) {
+                    if (line.includes('target:')) {
+                        const target = line.match(/target:\s*"([^"]+)"/)?.[1];
+                        if (!target) {
+                            errors.push('Invalid target format');
+                        } else if (target.includes('0.0.0.0')) {
+                            warnings.push('Scanning 0.0.0.0 is not recommended');
+                        }
+                    }
+                    
+                    if (line.includes('ports:')) {
+                        const ports = line.match(/ports:\s*"([^"]+)"/)?.[1];
+                        if (!ports) {
+                            errors.push('Invalid ports format');
+                        } else if (ports === '1-65535') {
+                            warnings.push('Scanning all ports may take a long time');
+                        }
+                    }
+                    
+                    if (line.includes('intensity:')) {
+                        const intensity = line.match(/intensity:\s*"([^"]+)"/)?.[1];
+                        const validIntensities = ['low', 'normal', 'medium', 'aggressive', 'insane'];
+                        if (!validIntensities.includes(intensity)) {
+                            errors.push(`Invalid intensity: ${intensity}. Must be one of: ${validIntensities.join(', ')}`);
+                        }
+                    }
+                }
+                
+                return { isValid: errors.length === 0, errors, warnings };
+            },
+
+            // Parse YAML configuration
+            parseYAML(yamlText) {
+                const config = {
+                    scan: {},
+                    output: {},
+                    options: {}
+                };
+                
+                const lines = yamlText.split('\n');
+                let currentSection = null;
+                
+                for (const line of lines) {
+                    const trimmedLine = line.trim();
+                    
+                    if (trimmedLine.endsWith(':')) {
+                        currentSection = trimmedLine.slice(0, -1);
+                    } else if (trimmedLine.includes(':') && currentSection) {
+                        const [key, value] = trimmedLine.split(':').map(s => s.trim());
+                        const cleanValue = value.replace(/["']/g, '');
+                        
+                        if (currentSection === 'scan') {
+                            config.scan[key] = cleanValue;
+                        } else if (currentSection === 'output') {
+                            config.output[key] = cleanValue === 'true' ? true : 
+                                               cleanValue === 'false' ? false : 
+                                               !isNaN(cleanValue) ? Number(cleanValue) : cleanValue;
+                        } else if (currentSection === 'options') {
+                            config.options[key] = cleanValue === 'true' ? true : 
+                                                cleanValue === 'false' ? false : 
+                                                !isNaN(cleanValue) ? Number(cleanValue) : cleanValue;
+                        }
+                    }
+                }
+                
+                return config;
+            },
+
+            // Calculate estimated scan time
+            estimateScanTime(config) {
+                let baseTime = 30; // seconds
+                const { scan } = config;
+                
+                // Adjust based on target scope
+                if (scan.target) {
+                    if (scan.target.includes('/24')) baseTime *= 4;
+                    if (scan.target.includes('/16')) baseTime *= 16;
+                    if (scan.target.includes('/8')) baseTime *= 64;
+                }
+                
+                // Adjust based on port range
+                if (scan.ports) {
+                    if (scan.ports.includes('-')) {
+                        const [start, end] = scan.ports.split('-').map(Number);
+                        const portCount = end - start + 1;
+                        baseTime *= (portCount / 1000);
+                    } else if (scan.ports.includes(',')) {
+                        const portCount = scan.ports.split(',').length;
+                        baseTime *= (portCount / 100);
+                    }
+                }
+                
+                // Adjust based on intensity
+                const intensityMultipliers = {
+                    low: 0.5,
+                    normal: 1,
+                    medium: 2,
+                    aggressive: 5,
+                    insane: 10
+                };
+                
+                if (scan.intensity && intensityMultipliers[scan.intensity]) {
+                    baseTime *= intensityMultipliers[scan.intensity];
+                }
+                
+                return Math.max(10, Math.min(baseTime, 300)); // Cap between 10-300 seconds
+            },
+
+            // Generate mock scan results based on configuration
+            generateScanResults(config) {
+                const vulnerabilities = [];
+                const services = [];
+                const openPorts = [];
+                
+                // Generate vulnerabilities based on intensity
+                const intensityVulns = {
+                    low: { critical: 0, high: 1, medium: 2, low: 3 },
+                    normal: { critical: 1, high: 2, medium: 4, low: 5 },
+                    medium: { critical: 2, high: 3, medium: 6, low: 8 },
+                    aggressive: { critical: 3, high: 5, medium: 8, low: 12 },
+                    insane: { critical: 5, high: 8, medium: 12, low: 15 }
+                };
+                
+                const intensity = config.scan.intensity || 'medium';
+                const vulnCounts = intensityVulns[intensity] || intensityVulns.medium;
+                
+                // Generate critical vulnerabilities
+                for (let i = 0; i < vulnCounts.critical; i++) {
+                    vulnerabilities.push({
+                        id: `CVE-2024-${1000 + i}`,
+                        title: `Critical Security Vulnerability ${i + 1}`,
+                        description: `A critical vulnerability that allows remote code execution. Immediate patching required.`,
+                        severity: 'critical',
+                        port: 22 + i,
+                        service: 'SSH',
+                        cvss: 9.0 + (i * 0.1)
+                    });
+                }
+                
+                // Generate high vulnerabilities
+                for (let i = 0; i < vulnCounts.high; i++) {
+                    vulnerabilities.push({
+                        id: `CVE-2024-${2000 + i}`,
+                        title: `High Risk Configuration ${i + 1}`,
+                        description: `Misconfiguration exposes sensitive data. Requires immediate attention.`,
+                        severity: 'high',
+                        port: 80 + i,
+                        service: 'HTTP',
+                        cvss: 7.5 + (i * 0.1)
+                    });
+                }
+                
+                // Generate medium vulnerabilities
+                for (let i = 0; i < vulnCounts.medium; i++) {
+                    vulnerabilities.push({
+                        id: `CVE-2024-${3000 + i}`,
+                        title: `Medium Risk Issue ${i + 1}`,
+                        description: `Potential security issue that should be addressed.`,
+                        severity: 'medium',
+                        port: 443 + i,
+                        service: 'HTTPS',
+                        cvss: 5.0 + (i * 0.1)
+                    });
+                }
+                
+                // Generate low vulnerabilities
+                for (let i = 0; i < vulnCounts.low; i++) {
+                    vulnerabilities.push({
+                        id: `CVE-2024-${4000 + i}`,
+                        title: `Low Risk Finding ${i + 1}`,
+                        description: `Informational finding for security best practices.`,
+                        severity: 'low',
+                        port: 21 + i,
+                        service: 'FTP',
+                        cvss: 3.0 + (i * 0.1)
+                    });
+                }
+                
+                // Generate services and open ports
+                const commonPorts = [22, 80, 443, 21, 25, 53, 110, 143, 3389, 5900];
+                const commonServices = ['SSH', 'HTTP', 'HTTPS', 'FTP', 'SMTP', 'DNS', 'POP3', 'IMAP', 'RDP', 'VNC'];
+                
+                commonPorts.forEach((port, index) => {
+                    openPorts.push(port);
+                    services.push({
+                        port,
+                        service: commonServices[index],
+                        version: `v${Math.floor(Math.random() * 5) + 1}.${Math.floor(Math.random() * 10)}`,
+                        banner: `Service banner for ${commonServices[index]}`
+                    });
+                });
+                
+                // Calculate risk score (0-100)
+                const riskScore = Math.min(100, 
+                    vulnCounts.critical * 20 + 
+                    vulnCounts.high * 10 + 
+                    vulnCounts.medium * 5 + 
+                    vulnCounts.low * 2
+                );
+                
+                // Determine risk level
+                let riskLevel = 'Low';
+                if (riskScore >= 80) riskLevel = 'Critical';
+                else if (riskScore >= 60) riskLevel = 'High';
+                else if (riskScore >= 40) riskLevel = 'Medium';
+                else if (riskScore >= 20) riskLevel = 'Low';
+                else riskLevel = 'Minimal';
+                
+                return {
+                    config,
+                    vulnerabilities,
+                    services,
+                    openPorts,
+                    statistics: {
+                        totalTargets: config.scan.target?.includes('/24') ? 254 : 1,
+                        totalPortsScanned: config.scan.ports?.includes('-') ? 
+                            parseInt(config.scan.ports.split('-')[1]) - parseInt(config.scan.ports.split('-')[0]) + 1 : 1000,
+                        scanDuration: App.estimateScanTime(config),
+                        startTime: new Date().toISOString(),
+                        endTime: new Date(Date.now() + App.estimateScanTime(config) * 1000).toISOString()
+                    },
+                    risk: {
+                        score: riskScore,
+                        level: riskLevel,
+                        breakdown: {
+                            critical: vulnCounts.critical,
+                            high: vulnCounts.high,
+                            medium: vulnCounts.medium,
+                            low: vulnCounts.low
+                        }
+                    }
+                };
+            },
+
+            // Perform security checks
+            performSecurityChecks(results) {
+                const checks = [];
+                
+                // Check for default credentials
+                checks.push({
+                    name: 'Default Credentials Check',
+                    status: 'warning',
+                    message: 'Check for default credentials on services'
+                });
+                
+                // Check for outdated software
+                const outdated = results.vulnerabilities.filter(v => v.cvss > 7).length;
+                if (outdated > 0) {
+                    checks.push({
+                        name: 'Outdated Software',
+                        status: 'critical',
+                        message: `${outdated} services are running outdated versions`
+                    });
+                }
+                
+                // Check for open sensitive ports
+                const sensitivePorts = results.openPorts.filter(p => [21, 23, 3389, 5900].includes(p));
+                if (sensitivePorts.length > 0) {
+                    checks.push({
+                        name: 'Sensitive Ports Open',
+                        status: 'warning',
+                        message: `${sensitivePorts.length} sensitive ports are accessible`
+                    });
+                }
+                
+                return checks;
+            }
+        };
+    </script>
+
+    <script>
+        // DOM Elements
+        const yamlBtn = document.getElementById('yamlBtn');
+        const yamlContent = document.getElementById('yamlContent');
+        const yamlEditor = document.getElementById('yamlEditor');
+        const loadSampleBtn = document.getElementById('loadSampleBtn');
+        const clearBtn = document.getElementById('clearBtn');
+        const scanBtn = document.getElementById('scanBtn');
+        const sampleData = document.getElementById('sampleData');
+        const sampleContent = document.getElementById('sampleContent');
+        const scanProgress = document.getElementById('scanProgress');
+        const scanResults = document.getElementById('scanResults');
+        const progressFill = document.getElementById('progressFill');
+        const progressPercent = document.getElementById('progressPercent');
+        const scanStatus = document.getElementById('scanStatus');
+        const targetCount = document.getElementById('targetCount');
+        const portCount = document.getElementById('portCount');
+        const statusMessage = document.getElementById('statusMessage');
+        
+        // Dashboard elements
+        const riskNeedle = document.getElementById('riskNeedle');
+        const riskLevel = document.getElementById('riskLevel');
+        const criticalCount = document.getElementById('criticalCount');
+        const highCount = document.getElementById('highCount');
+        const mediumCount = document.getElementById('mediumCount');
+        const lowCount = document.getElementById('lowCount');
+        const summaryTargets = document.getElementById('summaryTargets');
+        const summaryOpenPorts = document.getElementById('summaryOpenPorts');
+        const summaryServices = document.getElementById('summaryServices');
+        const summaryDuration = document.getElementById('summaryDuration');
+        const summaryVulnerabilities = document.getElementById('summaryVulnerabilities');
+        const summaryRiskScore = document.getElementById('summaryRiskScore');
+        const vulnerabilityList = document.getElementById('vulnerabilityList');
+
+        // Current scan simulation variables
+        let currentScanInterval = null;
+        let isScanning = false;
+        let currentScanResults = null;
+
+        // YAML Button - Toggle YAML content visibility
+        yamlBtn.addEventListener('click', () => {
+            const isActive = yamlContent.classList.contains('active');
+            yamlContent.classList.toggle('active');
+            yamlEditor.classList.toggle('active');
+            const yamlIndicator = yamlBtn.querySelector('.yaml-indicator');
+            
+            // Sync editor with content if editor is empty
+            if (!isActive && yamlEditor.value === '') {
+                yamlEditor.value = yamlContent.textContent;
+            }
+            
+            if (!isActive) {
+                yamlIndicator.textContent = '▲';
+                showStatus('YAML configuration expanded. You can edit the YAML below.', 'info');
+            } else {
+                yamlIndicator.textContent = '▼';
+                showStatus('YAML configuration collapsed', 'info');
+            }
+            
+            yamlBtn.blur();
+        });
+
+        // YAML Editor change handler
+        yamlEditor.addEventListener('input', () => {
+            // Update the displayed YAML content
+            yamlContent.textContent = yamlEditor.value;
+        });
+
+        // Load Sample Button
+        loadSampleBtn.addEventListener('click', async () => {
+            // Show loading state
+            loadSampleBtn.classList.add('loading');
+            
+            // Simulate loading delay
+            await new Promise(resolve => setTimeout(resolve, 800));
+            
+            // Remove loading state
+            loadSampleBtn.classList.remove('loading');
+            
+            // Select a random sample
+            const sampleConfigs = [
+                {
+                    name: "Basic Network Scan",
+                    config: `scan:
+  target: "192.168.1.0/24"
+  ports: "22,80,443,8080"
+  intensity: "normal"
+  timing: "3"
+  
+output:
+  format: "txt"
+  file: "network_scan.txt"
+  
+options:
+  stealth: false
+  max_retries: 2`
+                },
+                {
+                    name: "Web Application Scan",
+                    config: `scan:
+  target: "example.com"
+  ports: "80,443,3000,8080"
+  intensity: "aggressive"
+  scripts: "http-vuln,http-headers"
+  
+output:
+  format: "json"
+  file: "web_scan.json"
+  verbose: true
+  
+options:
+  stealth: true
+  timeout: 60`
+                },
+                {
+                    name: "Comprehensive Security Audit",
+                    config: `scan:
+  target: "10.0.0.0/16"
+  ports: "1-1024"
+  intensity: "insane"
+  timing: "paranoid"
+  scripts: "all"
+  
+output:
+  format: "xml"
+  file: "full_audit.xml"
+  verbose: true
+  
+options:
+  stealth: true
+  max_retries: 5
+  timeout: 120`
+                }
+            ];
+            
+            const randomSample = sampleConfigs[Math.floor(Math.random() * sampleConfigs.length)];
+            
+            // Update YAML content and editor
+            yamlContent.textContent = randomSample.config;
+            yamlEditor.value = randomSample.config;
+            
+            // Update sample display
+            sampleContent.textContent = `[${randomSample.name}]\n${randomSample.config}`;
+            
+            // Show sample data
+            sampleData.classList.add('active');
+            
+            // Auto-expand YAML editor if collapsed
+            if (!yamlContent.classList.contains('active')) {
+                yamlContent.classList.add('active');
+                yamlEditor.classList.add('active');
+                yamlBtn.querySelector('.yaml-indicator').textContent = '▲';
+            }
+            
+            // Validate the loaded sample
+            const validation = App.validateYAML(randomSample.config);
+            if (validation.isValid) {
+                showStatus(`Loaded sample: ${randomSample.name} - Configuration is valid`, 'success');
+                if (validation.warnings.length > 0) {
+                    setTimeout(() => {
+                        showStatus(`Warning: ${validation.warnings.join(', ')}`, 'info');
+                    }, 1000);
+                }
+            }
+            
+            loadSampleBtn.blur();
+        });
+
+        // Clear Button
+        clearBtn.addEventListener('click', () => {
+            // Show loading state
+            clearBtn.classList.add('loading');
+            
+            setTimeout(() => {
+                // Remove loading state
+                clearBtn.classList.remove('loading');
+                
+                // Clear sample data
+                sampleData.classList.remove('active');
+                sampleContent.textContent = '';
+                
+                // Clear scan results
+                scanProgress.classList.remove('active');
+                scanResults.classList.remove('active');
+                
+                // Reset YAML to default
+                const defaultConfig = `# Sample YAML Configuration
+scan:
+  target: "192.168.1.0/24"
+  ports: "1-1000"
+  intensity: "medium"
+  timing: "4"
+  scripts: "vuln"
+  
+output:
+  format: "json"
+  file: "scan_results.json"
+  verbose: true
+  
+options:
+  stealth: true
+  max_retries: 3
+  timeout: 30`;
+                
+                yamlContent.textContent = defaultConfig;
+                yamlEditor.value = defaultConfig;
+                
+                // Show cleared message
+                showStatus('All configurations cleared successfully', 'success');
+                
+                clearBtn.blur();
+            }, 600);
+        });
+
+        // Scan Button
+        scanBtn.addEventListener('click', () => {
+            if (isScanning) {
+                stopScan();
+                return;
+            }
+            
+            startScan();
+        });
+
+        function startScan() {
+            if (isScanning) return;
+            
+            const yamlText = yamlEditor.value || yamlContent.textContent;
+            
+            // Validate YAML using App.js
+            const validation = App.validateYAML(yamlText);
+            if (!validation.isValid) {
+                showStatus(`Configuration errors: ${validation.errors.join(', ')}`, 'error');
+                return;
+            }
+            
+            isScanning = true;
+            scanBtn.classList.add('loading');
+            scanBtn.innerHTML = `<div class="button-text"><span class="button-icon">⏹️</span>Stop Scan</div>`;
+            
+            // Show progress and hide results
+            scanProgress.classList.add('active');
+            scanResults.classList.remove('active');
+            
+            // Reset progress
+            progressFill.style.width = '0%';
+            progressPercent.textContent = '0%';
+            scanStatus.textContent = 'Validating configuration...';
+            
+            // Parse YAML using App.js
+            const config = App.parseYAML(yamlText);
+            const estimatedTime = App.estimateScanTime(config);
+            
+            // Set initial stats
+            targetCount.textContent = config.scan.target?.includes('/24') ? '254' : '1';
+            portCount.textContent = config.scan.ports?.includes('-') ? 
+                `${parseInt(config.scan.ports.split('-')[1]) - parseInt(config.scan.ports.split('-')[0]) + 1}` : 
+                '1000';
+            
+            // Start scan simulation
+            let progress = 0;
+            const scanSteps = [
+                'Validating configuration...',
+                'Parsing YAML configuration...',
+                'Initializing scanner engine...',
+                'Resolving target addresses...',
+                'Starting port discovery...',
+                'Running service detection...',
+                'Executing vulnerability scripts...',
+                'Analyzing security findings...',
+                'Generating risk assessment...',
+                'Compiling final report...'
+            ];
+            
+            currentScanInterval = setInterval(() => {
+                progress += Math.random() * 2 + 1; // 1-3% per interval
+                if (progress > 100) progress = 100;
+                
+                progressFill.style.width = `${progress}%`;
+                progressPercent.textContent = `${Math.round(progress)}%`;
+                
+                const stepIndex = Math.floor(progress / (100 / scanSteps.length));
+                if (stepIndex < scanSteps.length) {
+                    scanStatus.textContent = scanSteps[stepIndex];
+                }
+                
+                if (progress >= 100) {
+                    completeScan(config, yamlText, estimatedTime);
+                }
+            }, 200);
+        }
+
+        function stopScan() {
+            if (!isScanning) return;
+            
+            clearInterval(currentScanInterval);
+            isScanning = false;
+            scanBtn.classList.remove('loading');
+            scanBtn.innerHTML = `<div class="button-text"><span class="button-icon">🚀</span>Scan YAML</div>`;
+            scanStatus.textContent = 'Stopped by user';
+            showStatus('Scan stopped', 'info');
+        }
+
+        function completeScan(config, yamlText, estimatedTime) {
+            clearInterval(currentScanInterval);
+            isScanning = false;
+            scanBtn.classList.remove('loading');
+            scanBtn.innerHTML = `<div class="button-text"><span class="button-icon">🚀</span>Scan YAML</div>`;
+            scanStatus.textContent = 'Completed';
+            
+            // Generate results using App.js
+            currentScanResults = App.generateScanResults(config);
+            
+            // Update dashboard with results
+            updateDashboard(currentScanResults);
+            
+            // Show scan results
+            scanResults.classList.add('active');
+            
+            // Perform security checks
+            const securityChecks = App.performSecurityChecks(currentScanResults);
+            if (securityChecks.length > 0) {
+                setTimeout(() => {
+                    const criticalChecks = securityChecks.filter(c => c.status === 'critical');
+                    if (criticalChecks.length > 0) {
+                        showStatus(`${criticalChecks.length} critical security issues detected!`, 'error');
+                    }
+                }, 500);
+            }
+            
+            showStatus(`Scan completed successfully! Found ${currentScanResults.vulnerabilities.length} vulnerabilities.`, 'success');
+        }
+
+        function updateDashboard(results) {
+            // Update risk meter
+            const riskScore = results.risk.score;
+            const needlePosition = Math.min(100, riskScore);
+            riskNeedle.style.left = `${needlePosition}%`;
+            
+            // Rotate needle based on position
+            const rotation = (needlePosition - 50) * 1.8; // -90 to +90 degrees
+            riskNeedle.style.transform = `translate(-50%, -100%) rotate(${rotation}deg)`;
+            
+            // Update risk level
+            riskLevel.textContent = results.risk.level;
+            riskLevel.style.color = getRiskColor(results.risk.level);
+            
+            // Update severity breakdown
+            criticalCount.textContent = results.risk.breakdown.critical;
+            highCount.textContent = results.risk.breakdown.high;
+            mediumCount.textContent = results.risk.breakdown.medium;
+            lowCount.textContent = results.risk.breakdown.low;
+            
+            // Update scan summary
+            summaryTargets.textContent = results.statistics.totalTargets;
+            summaryOpenPorts.textContent = results.openPorts.length;
+            summaryServices.textContent = results.services.length;
+            summaryDuration.textContent = `${results.statistics.scanDuration}s`;
+            summaryVulnerabilities.textContent = results.vulnerabilities.length;
+            summaryRiskScore.textContent = `${results.risk.score}/100`;
+            
+            // Update vulnerability list
+            vulnerabilityList.innerHTML = '';
+            results.vulnerabilities.forEach(vuln => {
+                const vulnElement = document.createElement('div');
+                vulnElement.className = `vuln-item ${vuln.severity}`;
+                vulnElement.innerHTML = `
+                    <div class="vuln-header">
+                        <div class="vuln-title">${vuln.title}</div>
+                        <div class="vuln-severity ${vuln.severity}">${vuln.severity.toUpperCase()} (CVSS: ${vuln.cvss.toFixed(1)})</div>
+                    </div>
+                    <div class="vuln-description">${vuln.description}</div>
+                    <div class="vuln-meta">
+                        <span>Port: ${vuln.port}</span>
+                        <span>Service: ${vuln.service}</span>
+                        <span>ID: ${vuln.id}</span>
+                    </div>
+                `;
+                vulnerabilityList.appendChild(vulnElement);
+            });
+        }
+
+        function getRiskColor(level) {
+            switch(level.toLowerCase()) {
+                case 'critical': return '#dc2626';
+                case 'high': return '#ef4444';
+                case 'medium': return '#f97316';
+                case 'low': return '#f59e0b';
+                default: return '#10b981';
+            }
+        }
+
+        // Status message function
+        function showStatus(message, type = 'success') {
+            statusMessage.textContent = message;
+            statusMessage.className = 'status-message';
+            
+            if (type === 'error') {
+                statusMessage.classList.add('error');
+            } else if (type === 'info') {
+                statusMessage.classList.add('info');
+            }
+            
+            statusMessage.style.display = 'block';
+            
+            // Auto-hide status message after 4 seconds
+            setTimeout(() => {
+                statusMessage.style.display = 'none';
+            }, 4000);
+        }
+
+        // Keyboard shortcuts
+        document.addEventListener('keydown', (e) => {
+            // Ctrl+Y for YAML toggle
+            if (e.ctrlKey && e.key === 'y') {
+                e.preventDefault();
+                yamlBtn.click();
+            }
+            
+            // Ctrl+L for Load Sample
+            if (e.ctrlKey && e.key === 'l') {
+                e.preventDefault();
+                loadSampleBtn.click();
+            }
+            
+            // Ctrl+C for Clear
+            if (e.ctrlKey && e.key === 'c') {
+                e.preventDefault();
+                clearBtn.click();
+            }
+            
+            // Ctrl+S for Scan
+            if (e.ctrlKey && e.key === 's') {
+                e.preventDefault();
+                scanBtn.click();
+            }
+            
+            // Escape to stop scan
+            if (e.key === 'Escape' && isScanning) {
+                e.preventDefault();
+                stopScan();
+            }
+        });
+
+        // Initialization
+        document.addEventListener('DOMContentLoaded', () => {
+            // Set initial YAML editor content
+            yamlEditor.value = yamlContent.textContent;
+            
+            // Show welcome message
+            setTimeout(() => {
+                showStatus('Security Scanner Ready. Press Ctrl+S to start scan with App.js validation.', 'info');
+            }, 500);
+            
+            // Auto-hide status after 5 seconds
+            setTimeout(() => {
+                statusMessage.style.display = 'none';
+            }, 5000);
+        });
+    </script>
+</body>
+</html>
